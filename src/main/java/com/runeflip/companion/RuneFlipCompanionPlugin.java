@@ -436,6 +436,12 @@ public class RuneFlipCompanionPlugin extends Plugin
 				}
 			}));
 
+		// Fast Flip card (v0.7.0): same cadence as the rest of the panel.
+		// Display only — the response is rendered verbatim, never acted on.
+		apiClient.fetchFastFlipOverview(url,
+			response -> SwingUtilities.invokeLater(() -> target.updateFastFlip(response)),
+			() -> SwingUtilities.invokeLater(() -> target.updateFastFlip(null)));
+
 		apiClient.fetchCompletedAlerts(url, clientId,
 			response -> SwingUtilities.invokeLater(() -> target.updateCompleted(response)),
 			() -> SwingUtilities.invokeLater(() -> target.updateCompleted(null)));

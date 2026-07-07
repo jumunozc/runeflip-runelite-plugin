@@ -50,6 +50,8 @@ public class RuneFlipPanel extends PluginPanel
 	private final JLabel capitalLabel = new JLabel(" ");
 	private final JPanel topCard = new JPanel();
 	private final JPanel listPanel = new JPanel();
+	private final JLabel fastFlipHeader = new JLabel("Fast flip · 0");
+	private final JPanel fastFlipCard = new JPanel();
 	private final JLabel completedHeader = new JLabel("GE completed · 0");
 	private final JPanel completedPanel = new JPanel();
 	private final JLabel disclaimer = new JLabel();
@@ -63,6 +65,11 @@ public class RuneFlipPanel extends PluginPanel
 
 	/** Rows shown in the compact completed summary; the rest is "+n more". */
 	private static final int MAX_COMPLETED_ROWS = 3;
+	/** Entries shown in the compact Fast Flip card (backend sends up to 3). */
+	private static final int MAX_FAST_FLIP_ROWS = 3;
+	/** Shown verbatim when the backend omits its own disclaimer string. */
+	static final String FAST_FLIP_DISCLAIMER =
+		"Fast flip estimates are informational. Review manually before trading.";
 	/** Hard cap so one absurd name can never distort the narrow sidebar. */
 	private static final int MAX_NAME_CHARS = 40;
 
@@ -180,6 +187,21 @@ public class RuneFlipPanel extends PluginPanel
 		listPanel.setLayout(new BoxLayout(listPanel, BoxLayout.Y_AXIS));
 		listPanel.setOpaque(false);
 		add(listPanel);
+		add(Box.createVerticalStrut(10));
+
+		// ── Fast Flip (v0.7.0 — backend-computed, display only) ────────────
+		fastFlipHeader.setFont(FontManager.getRunescapeSmallFont());
+		fastFlipHeader.setForeground(MUTED);
+		add(wrap(fastFlipHeader));
+		add(Box.createVerticalStrut(4));
+		fastFlipCard.setLayout(new BoxLayout(fastFlipCard, BoxLayout.Y_AXIS));
+		fastFlipCard.setBackground(CARD_BG);
+		fastFlipCard.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+		JLabel fastFlipLoading = new JLabel("Loading…");
+		fastFlipLoading.setFont(FontManager.getRunescapeSmallFont());
+		fastFlipLoading.setForeground(MUTED);
+		fastFlipCard.add(fastFlipLoading);
+		add(fastFlipCard);
 		add(Box.createVerticalStrut(10));
 
 		// ── Completed offers (compact, visually secondary) ─────────────────
@@ -317,6 +339,89 @@ public class RuneFlipPanel extends PluginPanel
 			listPanel.add(Box.createVerticalStrut(3));
 		}
 		revalidateAll();
+	}
+
+	/**
+	 * Compact "Fast Flip" card (v0.7.0): renders the backend's top flips
+	 * verbatim — name, buy → sell, profit/item, speed labels, risk and
+	 * confidence all come pre-computed from GET /fast-flip/overview. The
+	 * plugin does no math here (formatting only) and never acts on the data.
+	 */
+	void updateFastFlip(RuneFlipData.FastFlipOverviewResponse response)
+	{
+		fastFlipCard.removeAll();
+		List<RuneFlipData.FastFlipItem> flips =
+			response == null ? null : response.topFlips;
+		int shown = flips == null ? 0 : Math.min(flips.size(), MAX_FAST_FLIP_ROWS);
+		fastFlipHeader.setText("Fast flip · " + shown);
+
+		if (shown == 0)
+		{
+			JLabel none = new JLabel(html("No fast flips qualify right now."));
+			none.setFont(FontManager.getRunescapeSmallFont());
+			none.setForeground(MUTED);
+			fastFlipCard.add(none);
+			revalidateAll();
+			return;
+		}
+
+		for (int i = 0; i < shown; i++)
+		{
+			if (i > 0)
+			{
+				fastFlipCard.add(Box.createVerticalStrut(6));
+			}
+			fastFlipCard.add(fastFlipEntry(flips.get(i)));
+		}
+
+		fastFlipCard.add(Box.createVerticalStrut(6));
+		String note = response.disclaimer != null && !response.disclaimer.trim().isEmpty()
+			? response.disclaimer.trim()
+			: FAST_FLIP_DISCLAIMER;
+		JLabel fastFlipDisclaimer = new JLabel(html(safe(note)));
+		fastFlipDisclaimer.setFont(FontManager.getRunescapeSmallFont());
+		fastFlipDisclaimer.setForeground(MUTED);
+		fastFlipCard.add(fastFlipDisclaimer);
+		revalidateAll();
+	}
+
+	/** One compact fast-flip entry: three small display-only lines. */
+	private JPanel fastFlipEntry(RuneFlipData.FastFlipItem flip)
+	{
+		JPanel entry = new JPanel();
+		entry.setLayout(new BoxLayout(entry, BoxLayout.Y_AXIS));
+		entry.setOpaque(false);
+		entry.setAlignmentX(LEFT_ALIGNMENT);
+
+		String risk = flip.riskLevel == null ? "UNKNOWN" : flip.riskLevel;
+		JLabel name = new JLabel(html(
+			"<b>" + safe(sanitizeName(flip.itemName)) + "</b>"
+				+ " <span style='color:" + riskColorHex(risk) + "'>· "
+				+ risk + " risk</span>"
+				+ (flip.confidence != null
+					? " <span style='color:#878d9c'>· conf " + flip.confidence + "</span>"
+					: "")));
+		name.setFont(FontManager.getRunescapeSmallFont());
+		name.setForeground(Color.WHITE);
+		entry.add(name);
+
+		JLabel prices = new JLabel(html(
+			"<span style='color:#878d9c'>Buy</span> " + gpOrDash(flip.suggestedBuyPrice)
+				+ " <span style='color:#878d9c'>→ Sell</span> "
+				+ gpOrDash(flip.suggestedSellPrice)
+				+ " <span style='color:#4cba86'>· "
+				+ profitPerItemLabel(flip.profitPerItem) + "/item</span>"));
+		prices.setFont(FontManager.getRunescapeSmallFont());
+		prices.setForeground(Color.WHITE);
+		entry.add(prices);
+
+		JLabel speeds = new JLabel(html(
+			"<span style='color:#878d9c'>Buy: " + speedLabel(flip.buySpeed)
+				+ " · Sell: " + speedLabel(flip.sellSpeed) + "</span>"));
+		speeds.setFont(FontManager.getRunescapeSmallFont());
+		entry.add(speeds);
+
+		return entry;
 	}
 
 	/**
@@ -566,6 +671,8 @@ public class RuneFlipPanel extends PluginPanel
 	{
 		topCard.revalidate();
 		topCard.repaint();
+		fastFlipCard.revalidate();
+		fastFlipCard.repaint();
 		listPanel.revalidate();
 		listPanel.repaint();
 		completedPanel.revalidate();
@@ -584,6 +691,69 @@ public class RuneFlipPanel extends PluginPanel
 	private static String pct(double ratio)
 	{
 		return String.format("%.1f%%", ratio * 100);
+	}
+
+	/** Nullable backend figure → gp text; "—" when the backend sent null. */
+	static String gpOrDash(Long value)
+	{
+		return value == null ? "—" : gp(value);
+	}
+
+	/** Backend profit/item verbatim, "+" prefixed when positive; "—" if null. */
+	static String profitPerItemLabel(Long profitPerItem)
+	{
+		if (profitPerItem == null)
+		{
+			return "—";
+		}
+		return (profitPerItem >= 0 ? "+" : "") + gp(profitPerItem);
+	}
+
+	/**
+	 * Backend speed enum → short human label. Anything unexpected renders as
+	 * "Unknown" — the plugin never guesses a speed itself.
+	 */
+	static String speedLabel(String speed)
+	{
+		if (speed == null)
+		{
+			return "Unknown";
+		}
+		switch (speed)
+		{
+			case "VERY_FAST":
+				return "Very fast";
+			case "FAST":
+				return "Fast";
+			case "MODERATE":
+				return "Moderate";
+			case "SLOW":
+				return "Slow";
+			default:
+				return "Unknown";
+		}
+	}
+
+	/** Risk enum → label color hex, matching the panel's existing palette. */
+	static String riskColorHex(String riskLevel)
+	{
+		if (riskLevel == null)
+		{
+			return "#878d9c";
+		}
+		switch (riskLevel)
+		{
+			case "LOW":
+				return "#4cba86";
+			case "MEDIUM":
+				return "#e3b75d";
+			case "HIGH":
+				return "#e8894a";
+			case "AVOID":
+				return "#e26a5e";
+			default:
+				return "#878d9c";
+		}
 	}
 
 	/**

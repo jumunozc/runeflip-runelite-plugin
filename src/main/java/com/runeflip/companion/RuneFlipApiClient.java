@@ -48,6 +48,17 @@ public class RuneFlipApiClient
 			RuneFlipData.RecommendationsResponse.class, onSuccess, onFailure);
 	}
 
+	public void fetchFastFlipOverview(
+		String backendUrl,
+		Consumer<RuneFlipData.FastFlipOverviewResponse> onSuccess,
+		Runnable onFailure)
+	{
+		// Public market data: no client id required. The response is
+		// display-only — the plugin renders it and never acts on it.
+		get(backendUrl, "/fast-flip/overview?limit=3", null,
+			RuneFlipData.FastFlipOverviewResponse.class, onSuccess, onFailure);
+	}
+
 	public void fetchCapital(
 		String backendUrl,
 		String clientId,

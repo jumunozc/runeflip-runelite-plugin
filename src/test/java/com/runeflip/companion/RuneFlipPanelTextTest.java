@@ -67,6 +67,39 @@ public class RuneFlipPanelTextTest
 	}
 
 	@Test
+	public void fastFlipSpeedLabelsAreHumanReadableAndNeverGuess()
+	{
+		assertEquals("Very fast", RuneFlipPanel.speedLabel("VERY_FAST"));
+		assertEquals("Fast", RuneFlipPanel.speedLabel("FAST"));
+		assertEquals("Moderate", RuneFlipPanel.speedLabel("MODERATE"));
+		assertEquals("Slow", RuneFlipPanel.speedLabel("SLOW"));
+		assertEquals("Unknown", RuneFlipPanel.speedLabel("UNKNOWN"));
+		assertEquals("Unknown", RuneFlipPanel.speedLabel(null));
+		assertEquals("Unknown", RuneFlipPanel.speedLabel("WARP_SPEED"));
+	}
+
+	@Test
+	public void fastFlipNullFiguresRenderAsDashNotZero()
+	{
+		assertEquals("—", RuneFlipPanel.gpOrDash(null));
+		assertTrue(RuneFlipPanel.gpOrDash(1_500L).endsWith(" gp"));
+		assertEquals("—", RuneFlipPanel.profitPerItemLabel(null));
+		assertTrue(RuneFlipPanel.profitPerItemLabel(120L).startsWith("+"));
+		assertFalse(RuneFlipPanel.profitPerItemLabel(-5L).startsWith("+"));
+	}
+
+	@Test
+	public void fastFlipRiskColorsFallBackToMutedForUnknownLevels()
+	{
+		assertEquals("#4cba86", RuneFlipPanel.riskColorHex("LOW"));
+		assertEquals("#e3b75d", RuneFlipPanel.riskColorHex("MEDIUM"));
+		assertEquals("#e8894a", RuneFlipPanel.riskColorHex("HIGH"));
+		assertEquals("#e26a5e", RuneFlipPanel.riskColorHex("AVOID"));
+		assertEquals("#878d9c", RuneFlipPanel.riskColorHex(null));
+		assertEquals("#878d9c", RuneFlipPanel.riskColorHex("BANANA"));
+	}
+
+	@Test
 	public void badTimestampsRenderNothingInsteadOfGarbage()
 	{
 		long now = Instant.parse("2026-07-06T12:00:00Z").toEpochMilli();
