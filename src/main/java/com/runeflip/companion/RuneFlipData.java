@@ -58,4 +58,26 @@ public final class RuneFlipData
 		public String message;
 		public String createdAt;
 	}
+
+	/** Body of POST /pairing/complete — just the user-pasted code. */
+	public static class PairingRequest
+	{
+		public final String code;
+
+		public PairingRequest(String code)
+		{
+			this.code = code;
+		}
+	}
+
+	/**
+	 * Response of POST /pairing/complete (v0.6.3). The token appears ONLY
+	 * here, exactly once — it is stored in the plugin config (secret) and
+	 * must never be logged or displayed.
+	 */
+	public static class PairingResponse
+	{
+		public String clientId;
+		public String token;
+	}
 }

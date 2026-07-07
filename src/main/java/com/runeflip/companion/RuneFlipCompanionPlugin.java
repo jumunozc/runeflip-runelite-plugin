@@ -157,7 +157,8 @@ public class RuneFlipCompanionPlugin extends Plugin
 		apiClient = new RuneFlipApiClient(okHttpClient, gson);
 		if (config.panelEnabled())
 		{
-			panel = new RuneFlipPanel(itemManager, this::refreshPanel);
+			panel = new RuneFlipPanel(
+				itemManager, this::refreshPanel, pairingActions(), isPaired());
 			navButton = NavigationButton.builder()
 				.tooltip("RuneFlip")
 				.icon(buildNavIcon())
@@ -278,6 +279,102 @@ public class RuneFlipCompanionPlugin extends Plugin
 				log.warn("RuneFlip snapshot build failed: {}", e.getMessage());
 			}
 		});
+	}
+
+	/** Paired = a pairing-issued token is stored (locally) in the config. */
+	private boolean isPaired()
+	{
+		return !config.pairedAt().trim().isEmpty()
+			&& !config.ingestToken().trim().isEmpty();
+	}
+
+	private RuneFlipPanel.PairingActions pairingActions()
+	{
+		return new RuneFlipPanel.PairingActions()
+		{
+			@Override
+			public void pair(String code, java.util.function.Consumer<String> onResult)
+			{
+				completePairing(code, onResult);
+			}
+
+			@Override
+			public void unpair(java.util.function.Consumer<String> onResult)
+			{
+				revokePairing(onResult);
+			}
+		};
+	}
+
+	/**
+	 * Exchanges the user-pasted code for the paired clientId + scoped token
+	 * (v0.6.3) and adopts both in the plugin config. Everything stays local:
+	 * config writes + one HTTP call. The token is stored as a secret config
+	 * value and NEVER logged or displayed.
+	 */
+	private void completePairing(String code, java.util.function.Consumer<String> onResult)
+	{
+		apiClient.completePairing(config.backendUrl(), code,
+			response ->
+			{
+				configManager.setConfiguration(
+					RuneFlipCompanionConfig.GROUP, "clientId",
+					response.clientId.trim().toLowerCase());
+				configManager.setConfiguration(
+					RuneFlipCompanionConfig.GROUP, "ingestToken",
+					response.token.trim());
+				configManager.setConfiguration(
+					RuneFlipCompanionConfig.GROUP, "pairedAt",
+					Instant.now().toString());
+				// New identity: force a fresh snapshot/capital send.
+				lastSentFingerprint = null;
+				lastCapitalFingerprint = null;
+				log.info("RuneFlip Companion paired — adopted the dashboard's client id");
+				SwingUtilities.invokeLater(() ->
+				{
+					RuneFlipPanel target = panel;
+					if (target != null)
+					{
+						target.setPaired(true);
+					}
+					onResult.accept("Paired. GE slot sync is now connected.");
+				});
+				refreshPanel();
+			},
+			message -> SwingUtilities.invokeLater(() -> onResult.accept(message)));
+	}
+
+	/**
+	 * Unpair: best-effort server-side revoke, then the token is removed from
+	 * the local config regardless. The clientId is kept so the informational
+	 * panel keeps showing this install's data.
+	 */
+	private void revokePairing(java.util.function.Consumer<String> onResult)
+	{
+		String token = config.ingestToken().trim();
+		Runnable clearLocal = () ->
+		{
+			configManager.setConfiguration(
+				RuneFlipCompanionConfig.GROUP, "ingestToken", "");
+			configManager.setConfiguration(
+				RuneFlipCompanionConfig.GROUP, "pairedAt", "");
+			log.info("RuneFlip Companion unpaired — token revoked and removed");
+			SwingUtilities.invokeLater(() ->
+			{
+				RuneFlipPanel target = panel;
+				if (target != null)
+				{
+					target.setPaired(false);
+				}
+				onResult.accept("Unpaired. Sync stays off until you pair again.");
+			});
+		};
+		if (token.isEmpty())
+		{
+			clearLocal.run();
+			return;
+		}
+		apiClient.revokeToken(config.backendUrl(), token, clearLocal);
 	}
 
 	/** Soft panel refresh while it exists — display only, min 30s cadence. */

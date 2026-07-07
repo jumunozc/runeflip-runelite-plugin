@@ -44,6 +44,7 @@ public class RuneFlipPanel extends PluginPanel
 
 	private final ItemManager itemManager;
 	private final Runnable onRefresh;
+	private final PairingActions pairingActions;
 
 	private final JLabel statusLabel = new JLabel("Offline");
 	private final JLabel capitalLabel = new JLabel(" ");
@@ -53,15 +54,42 @@ public class RuneFlipPanel extends PluginPanel
 	private final JPanel completedPanel = new JPanel();
 	private final JLabel disclaimer = new JLabel();
 
+	private final JLabel pairingStatus = new JLabel("Not paired");
+	private final javax.swing.JTextField pairingCodeField = new javax.swing.JTextField();
+	private final JButton pairButton;
+	private final JButton unpairButton;
+	private final JPanel pairingInputRow = new JPanel(new BorderLayout(6, 0));
+	private final JLabel pairingHint = new JLabel();
+
 	/** Rows shown in the compact completed summary; the rest is "+n more". */
 	private static final int MAX_COMPLETED_ROWS = 3;
 	/** Hard cap so one absurd name can never distort the narrow sidebar. */
 	private static final int MAX_NAME_CHARS = 40;
 
-	public RuneFlipPanel(ItemManager itemManager, Runnable onRefresh)
+	/**
+	 * Pairing callbacks implemented by the plugin (v0.6.3). Both are
+	 * user-click only, touch nothing but HTTP + plugin config, and report
+	 * back with a display message — the token itself never passes through
+	 * the panel.
+	 */
+	interface PairingActions
+	{
+		void pair(String code, java.util.function.Consumer<String> onResult);
+
+		void unpair(java.util.function.Consumer<String> onResult);
+	}
+
+	public RuneFlipPanel(
+		ItemManager itemManager,
+		Runnable onRefresh,
+		PairingActions pairingActions,
+		boolean initiallyPaired)
 	{
 		this.itemManager = itemManager;
 		this.onRefresh = onRefresh;
+		this.pairingActions = pairingActions;
+		this.pairButton = smallButton("Pair");
+		this.unpairButton = smallButton("Unpair");
 
 		setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
 		setBackground(PANEL_BG);
@@ -94,6 +122,52 @@ public class RuneFlipPanel extends PluginPanel
 		JPanel capitalRow = wrap(capitalLabel);
 		add(capitalRow);
 		add(Box.createVerticalStrut(8));
+
+		// ── Pairing (v0.6.3 — config + HTTP only, never touches the game) ──
+		JPanel pairingHeader = new JPanel(new BorderLayout());
+		pairingHeader.setOpaque(false);
+		JLabel pairingTitle = new JLabel("Pairing");
+		pairingTitle.setFont(FontManager.getRunescapeSmallFont());
+		pairingTitle.setForeground(MUTED);
+		pairingHeader.add(pairingTitle, BorderLayout.WEST);
+		JPanel pairingHeaderRight = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
+		pairingHeaderRight.setOpaque(false);
+		pairingStatus.setFont(FontManager.getRunescapeSmallFont());
+		pairingHeaderRight.add(pairingStatus);
+		pairingHeaderRight.add(unpairButton);
+		pairingHeader.add(pairingHeaderRight, BorderLayout.EAST);
+		pairingHeader.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+		pairingHeader.setAlignmentX(LEFT_ALIGNMENT);
+		add(pairingHeader);
+		add(Box.createVerticalStrut(4));
+
+		pairingCodeField.setFont(FontManager.getRunescapeSmallFont());
+		pairingCodeField.setToolTipText(
+			"Paste the pairing code from RuneFlip Settings → RuneLite Pairing");
+		pairingInputRow.setOpaque(false);
+		pairingInputRow.add(pairingCodeField, BorderLayout.CENTER);
+		pairingInputRow.add(pairButton, BorderLayout.EAST);
+		pairingInputRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
+		pairingInputRow.setAlignmentX(LEFT_ALIGNMENT);
+		add(pairingInputRow);
+		add(Box.createVerticalStrut(4));
+
+		pairingHint.setFont(FontManager.getRunescapeSmallFont());
+		pairingHint.setForeground(MUTED);
+		add(wrap(pairingHint));
+		add(Box.createVerticalStrut(8));
+
+		pairButton.addActionListener(e -> submitPairing());
+		unpairButton.addActionListener(e ->
+		{
+			unpairButton.setEnabled(false);
+			pairingActions.unpair(message ->
+			{
+				unpairButton.setEnabled(true);
+				pairingHint.setText(html(message));
+			});
+		});
+		setPaired(initiallyPaired);
 
 		// ── Top recommendation card ─────────────────────────────────────────
 		topCard.setLayout(new BoxLayout(topCard, BoxLayout.Y_AXIS));
@@ -129,6 +203,51 @@ public class RuneFlipPanel extends PluginPanel
 	}
 
 	// ── state updates (always called on the EDT) ─────────────────────────────
+
+	/**
+	 * Paired = the plugin holds a pairing-issued token in its LOCAL config.
+	 * Display only; the token value never reaches the panel.
+	 */
+	void setPaired(boolean paired)
+	{
+		pairingStatus.setText(paired ? "Paired" : "Not paired");
+		pairingStatus.setForeground(paired ? PROFIT : MUTED);
+		pairingInputRow.setVisible(!paired);
+		unpairButton.setVisible(paired);
+		if (paired)
+		{
+			pairingCodeField.setText("");
+			pairingHint.setText(html(
+				"GE slot sync is connected to your RuneFlip dashboard."));
+		}
+		else
+		{
+			pairingHint.setText(html(
+				"Generate a code in RuneFlip Settings → RuneLite Pairing "
+					+ "(web or mobile) and paste it here."));
+		}
+		revalidate();
+		repaint();
+	}
+
+	private void submitPairing()
+	{
+		String code = pairingCodeField.getText() == null
+			? ""
+			: pairingCodeField.getText().trim();
+		if (code.isEmpty())
+		{
+			pairingHint.setText(html("Paste a pairing code first."));
+			return;
+		}
+		pairButton.setEnabled(false);
+		pairingHint.setText(html("Pairing…"));
+		pairingActions.pair(code, message ->
+		{
+			pairButton.setEnabled(true);
+			pairingHint.setText(html(message));
+		});
+	}
 
 	void showLoading()
 	{

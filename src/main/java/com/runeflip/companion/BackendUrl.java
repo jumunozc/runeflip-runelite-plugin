@@ -55,4 +55,18 @@ public final class BackendUrl
 		String base = normalize(raw);
 		return base == null ? null : base + "/player-capital/snapshot";
 	}
+
+	/** Pairing completion endpoint (v0.6.3), or null when unusable. */
+	public static String pairingCompleteEndpoint(String raw)
+	{
+		String base = normalize(raw);
+		return base == null ? null : base + "/pairing/complete";
+	}
+
+	/** Pairing token revoke endpoint (v0.6.3), or null when unusable. */
+	public static String pairingTokenEndpoint(String raw)
+	{
+		String base = normalize(raw);
+		return base == null ? null : base + "/pairing/token";
+	}
 }

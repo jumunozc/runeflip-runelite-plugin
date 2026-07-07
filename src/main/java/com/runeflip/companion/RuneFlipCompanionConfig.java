@@ -29,7 +29,7 @@ public interface RuneFlipCompanionConfig extends Config
 	@ConfigItem(
 		keyName = "ingestToken",
 		name = "Ingest token",
-		description = "Local RuneFlip token (OSRS_GE_INGEST_TOKEN from the backend's .env). NOT a Jagex credential.",
+		description = "Filled automatically when you pair from the sidebar panel (v0.6.3). Self-hosted backends can still paste OSRS_GE_INGEST_TOKEN manually. NOT a Jagex credential.",
 		secret = true,
 		position = 2
 	)
@@ -121,6 +121,23 @@ public interface RuneFlipCompanionConfig extends Config
 		position = 9
 	)
 	default String clientId()
+	{
+		return "";
+	}
+
+	/**
+	 * When pairing last completed (v0.6.3), ISO-8601. Empty = not paired.
+	 * Drives the Paired / Not paired label; the token itself is never
+	 * displayed anywhere.
+	 */
+	@ConfigItem(
+		keyName = "pairedAt",
+		name = "Paired at",
+		description = "Set automatically when pairing completes (informational)",
+		hidden = true,
+		position = 10
+	)
+	default String pairedAt()
 	{
 		return "";
 	}

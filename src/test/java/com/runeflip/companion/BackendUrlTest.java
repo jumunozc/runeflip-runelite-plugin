@@ -41,4 +41,17 @@ public class BackendUrlTest
 		assertNull(BackendUrl.snapshotEndpoint("ftp://host/api"));
 		assertNull(BackendUrl.snapshotEndpoint("http://"));
 	}
+
+	@Test
+	public void buildsPairingEndpoints()
+	{
+		assertEquals(
+			"https://runeflip-api.onrender.com/api/pairing/complete",
+			BackendUrl.pairingCompleteEndpoint("https://runeflip-api.onrender.com/api"));
+		assertEquals(
+			"https://runeflip-api.onrender.com/api/pairing/token",
+			BackendUrl.pairingTokenEndpoint("https://runeflip-api.onrender.com"));
+		assertNull(BackendUrl.pairingCompleteEndpoint("not-a-url"));
+		assertNull(BackendUrl.pairingTokenEndpoint(null));
+	}
 }

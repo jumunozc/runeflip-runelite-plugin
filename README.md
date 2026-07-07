@@ -38,7 +38,7 @@ Open RuneLite → Configuration → **RuneFlip Companion**:
 | Setting | Meaning | Default |
 | --- | --- | --- |
 | Backend URL | RuneFlip API base URL. Point it at the public RuneFlip service or your own self-hosted backend. | `https://runeflip-api.onrender.com/api` |
-| Ingest token | Backend's `OSRS_GE_INGEST_TOKEN` (self-hosted). Stored by RuneLite as a secret config value, never logged. **Not** a Jagex credential. Without it, slot sync stays off. | empty |
+| Ingest token | Filled automatically by **Pairing** (below). Self-hosted backends can still paste `OSRS_GE_INGEST_TOKEN` manually. Stored by RuneLite as a secret config value, never logged. **Not** a Jagex credential. Without it, slot sync stays off. | empty |
 | Sync enabled | Master switch for GE slot sync. | on (inert until URL + token are set) |
 | Heartbeat (seconds) | GE check cadence; unchanged snapshots are skipped. | 60 (min 30) |
 | Keepalive (minutes) | Re-send an unchanged snapshot after this long. | 5 (min 1) |
@@ -50,6 +50,22 @@ The plugin also generates a random anonymous client id (a UUID) the first
 time it runs and sends it as `X-RuneFlip-Client-Id` so the backend keeps
 your data separate from other users. It identifies the *install*, not you:
 no account name, no hardware info, no Jagex identity.
+
+## Pairing
+
+The easy way to connect (no config files, no manual tokens):
+
+1. In the RuneFlip dashboard (web or mobile), open **Settings → RuneLite
+   Pairing** and press **Generate pairing code**.
+2. In RuneLite, open the RuneFlip sidebar panel → **Pairing**, paste the
+   code and click **Pair**.
+
+The code is one-time and expires after ~10 minutes. On success the plugin
+adopts the dashboard's anonymous client id and receives an ingest token
+scoped to it — stored as a secret RuneLite config value, never logged and
+never displayed. **Unpair** revokes the token server-side and removes it
+locally. Pairing exchanges only the pasted code over HTTPS; it reads and
+writes nothing in the game.
 
 ## Data sent
 
