@@ -120,6 +120,34 @@ run `RuneFlipCompanionPluginTest.main()` (the standard RuneLite
 external-plugin dev flow), then enable **RuneFlip Companion** in the plugin
 list.
 
+## Manual preview install (Plugin Hub deferred)
+
+RuneFlip Companion is **not on the RuneLite Plugin Hub yet** — the Plugin Hub
+submission PR is intentionally deferred while the project stabilises. Until
+it lands there, the plugin is distributed as a **preview build you sideload
+yourself**:
+
+1. Build the jar (see **Build** above): `./gradlew clean test build` produces
+   `build/libs/runeflip-companion-<version>.jar` (currently
+   `runeflip-companion-0.8.3.jar`).
+2. Copy that jar into RuneLite's sideloaded-plugins folder:
+   - Windows: `%USERPROFILE%\.runelite\sideloaded-plugins\`
+   - macOS / Linux: `~/.runelite/sideloaded-plugins/`
+3. Restart RuneLite, then enable **RuneFlip Companion** in the plugin list and
+   configure it as described under **Configuration** / **Pairing**.
+
+Sideloaded plugins run unsigned and are **not** vetted by the RuneLite team —
+install only a jar you built (or trust). The default **Backend URL**
+(`https://runeflip-api.onrender.com/api`) points at the public RuneFlip
+service; point it at your own backend if you self-host.
+
+> Smoke-tested against production for **v0.8.3** (2026-07): `gradlew clean
+> test build` green, jar emitted, and the public backend's `strategy`
+> echo, recommended-`action` block and `/pairing`, `/strategy/preferences`,
+> `/ge-slots/snapshot` endpoints verified live. Assisted Offer Setup stays
+> **OFF by default** and clipboard-only. See
+> `docs/runelite-readonly-contract.md` in the monorepo for the full contract.
+
 ## License
 
 [BSD 2-Clause](LICENSE).
