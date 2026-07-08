@@ -186,6 +186,15 @@ public final class RuneFlipData
 		public String actionLabel;
 		public String actionReason;
 		public Boolean reviewOnly;
+		/**
+		 * Assisted Offer Setup metadata (v0.8.3), null on pre-0.8.3 backends
+		 * and for actions with nothing to set up (HOLD / ABORT_* / AVOID).
+		 * These are values the user MAY copy to the clipboard after an
+		 * explicit click — never filled, submitted or acted on.
+		 */
+		public Long targetPrice;
+		public Long targetQuantity;
+		public String targetSource;
 	}
 
 	/**

@@ -307,7 +307,10 @@ public class FastFlipMappingTest
 			+ "    \"actionType\": \"MODIFY_BUY\","
 			+ "    \"actionLabel\": \"Modify buy\","
 			+ "    \"actionReason\": \"Buy offer at 90 gp sits below the recommended 96 gp.\","
-			+ "    \"reviewOnly\": true"
+			+ "    \"reviewOnly\": true,"
+			+ "    \"targetPrice\": 96,"
+			+ "    \"targetQuantity\": 1000,"
+			+ "    \"targetSource\": \"Price Edge recommended buy\""
 			+ "  },"
 			+ "  \"disclaimer\": \"Fast flip estimates are informational. Review manually before trading.\""
 			+ "}],"
@@ -341,6 +344,10 @@ public class FastFlipMappingTest
 		assertEquals("Modify buy", action.actionLabel);
 		assertTrue(action.actionReason.contains("96 gp"));
 		assertEquals(Boolean.TRUE, action.reviewOnly);
+		// Assisted Offer Setup metadata (v0.8.3) mapped verbatim.
+		assertEquals(Long.valueOf(96L), action.targetPrice);
+		assertEquals(Long.valueOf(1000L), action.targetQuantity);
+		assertEquals("Price Edge recommended buy", action.targetSource);
 
 		assertNotNull(overview.slotInsights);
 		assertEquals(1, overview.slotInsights.size());

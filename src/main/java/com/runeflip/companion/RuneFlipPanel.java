@@ -63,6 +63,10 @@ public class RuneFlipPanel extends PluginPanel
 	private final JPanel pairingInputRow = new JPanel(new BorderLayout(6, 0));
 	private final JLabel pairingHint = new JLabel();
 
+	/** Assisted Offer Setup opt-in (v0.8.3), refreshed from config on each
+	 *  Fast Flip update. OFF by default — Copy buttons stay hidden. */
+	private boolean assistedSetupEnabled = false;
+
 	/** Rows shown in the compact completed summary; the rest is "+n more". */
 	private static final int MAX_COMPLETED_ROWS = 3;
 	/** Entries shown in the compact Fast Flip card (backend sends up to 3). */
@@ -73,6 +77,10 @@ public class RuneFlipPanel extends PluginPanel
 	/** Price Edge fallback disclaimer (v0.7.1), same rule as above. */
 	static final String PRICE_EDGE_DISCLAIMER =
 		"Targets are estimates. Review manually.";
+	/** Assisted Offer Setup note (v0.8.3), shown whenever Copy buttons are. */
+	static final String ASSISTED_SETUP_NOTE =
+		"Assisted setup prepares values only. You must review and confirm "
+			+ "manually.";
 	/** Hard cap so one absurd name can never distort the narrow sidebar. */
 	private static final int MAX_NAME_CHARS = 40;
 
@@ -352,6 +360,20 @@ public class RuneFlipPanel extends PluginPanel
 	 */
 	void updateFastFlip(RuneFlipData.FastFlipOverviewResponse response)
 	{
+		updateFastFlip(response, assistedSetupEnabled);
+	}
+
+	/**
+	 * Rebuilds the Fast Flip card. `assistedSetup` is the opt-in flag
+	 * (config, OFF by default): when true, entries whose recommended action
+	 * points at a concrete price show clipboard-only Copy buttons (v0.8.3).
+	 * Everything else stays display-only.
+	 */
+	void updateFastFlip(
+		RuneFlipData.FastFlipOverviewResponse response,
+		boolean assistedSetup)
+	{
+		this.assistedSetupEnabled = assistedSetup;
 		fastFlipCard.removeAll();
 		List<RuneFlipData.FastFlipItem> flips =
 			response == null ? null : response.topFlips;
@@ -381,16 +403,33 @@ public class RuneFlipPanel extends PluginPanel
 			return;
 		}
 
+		boolean anyAssistedShown = false;
 		for (int i = 0; i < shown; i++)
 		{
 			if (i > 0)
 			{
 				fastFlipCard.add(Box.createVerticalStrut(6));
 			}
-			fastFlipCard.add(fastFlipEntry(flips.get(i)));
+			RuneFlipData.FastFlipItem flip = flips.get(i);
+			fastFlipCard.add(fastFlipEntry(flip, assistedSetup));
+			anyAssistedShown =
+				anyAssistedShown || showAssistedSetup(flip.action, assistedSetup);
 		}
 
 		fastFlipCard.add(Box.createVerticalStrut(6));
+
+		// Assisted Offer Setup compliance note (v0.8.3): shown whenever any
+		// Copy button was rendered, so the "prepares values only" limit is
+		// always visible next to the buttons.
+		if (anyAssistedShown)
+		{
+			JLabel setupNote = new JLabel(html(safe(ASSISTED_SETUP_NOTE)));
+			setupNote.setFont(FontManager.getRunescapeSmallFont());
+			setupNote.setForeground(GOLD);
+			fastFlipCard.add(setupNote);
+			fastFlipCard.add(Box.createVerticalStrut(4));
+		}
+
 		String note = response.disclaimer != null && !response.disclaimer.trim().isEmpty()
 			? response.disclaimer.trim()
 			: FAST_FLIP_DISCLAIMER;
@@ -408,8 +447,12 @@ public class RuneFlipPanel extends PluginPanel
 		revalidateAll();
 	}
 
-	/** One compact fast-flip entry: three small display-only lines. */
-	private JPanel fastFlipEntry(RuneFlipData.FastFlipItem flip)
+	/** One compact fast-flip entry: display-only lines, plus (opt-in) the
+	 *  clipboard-only Assisted Offer Setup buttons when the action has a
+	 *  concrete target price. */
+	private JPanel fastFlipEntry(
+		RuneFlipData.FastFlipItem flip,
+		boolean assistedSetup)
 	{
 		JPanel entry = new JPanel();
 		entry.setLayout(new BoxLayout(entry, BoxLayout.Y_AXIS));
@@ -454,6 +497,12 @@ public class RuneFlipPanel extends PluginPanel
 			entry.add(action);
 		}
 
+		// Assisted Offer Setup (v0.8.3, opt-in): clipboard-only Copy buttons.
+		if (showAssistedSetup(flip.action, assistedSetup))
+		{
+			entry.add(assistedSetupRow(flip.action));
+		}
+
 		// Price Edge targets (v0.7.1): two extra display-only lines with the
 		// backend's wiki-vs-target prices. Nothing here computes or acts.
 		String targetLine = priceEdgeTargetLine(flip.priceEdge);
@@ -472,6 +521,57 @@ public class RuneFlipPanel extends PluginPanel
 		}
 
 		return entry;
+	}
+
+	/**
+	 * Whether the opt-in Assisted Offer Setup Copy buttons should be shown for
+	 * one action. All must hold: the config is ON, the action exists and is
+	 * reviewOnly (the compliance invariant every action carries), and it
+	 * points at a concrete price to copy (BUY_NEW / SELL_EXISTING /
+	 * MODIFY_BUY / MODIFY_SELL). HOLD / ABORT_* / AVOID carry no target, so no
+	 * buttons appear. This decides VISIBILITY only — the buttons themselves
+	 * are clipboard-only (see {@link #assistedSetupRow}).
+	 */
+	static boolean showAssistedSetup(
+		RuneFlipData.RecommendedAction action, boolean enabled)
+	{
+		return enabled
+			&& action != null
+			&& Boolean.TRUE.equals(action.reviewOnly)
+			&& action.targetPrice != null;
+	}
+
+	/** Copy-quantity is offered only when the action carries a target qty. */
+	static boolean showCopyQuantity(RuneFlipData.RecommendedAction action)
+	{
+		return action != null && action.targetQuantity != null;
+	}
+
+	/**
+	 * COMPLIANCE — Assisted Offer Setup (v0.8.3). Every control built here
+	 * does exactly ONE thing: copy a backend-computed value to the system
+	 * clipboard on an explicit user click. There is deliberately NO code path
+	 * from these buttons to the game client — no field is filled, no offer is
+	 * confirmed, cancelled or collected, no menu/widget/varp/varc is touched,
+	 * no mouse or keyboard input is synthesized. RuneFlip may assist input,
+	 * but never execute intent. Do not add anything here that reaches the
+	 * client; if a genuinely safe prepare-field API ever appears it must be
+	 * user-click only and still never confirm/cancel/collect.
+	 */
+	private JPanel assistedSetupRow(RuneFlipData.RecommendedAction action)
+	{
+		JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 2));
+		row.setOpaque(false);
+		row.setAlignmentX(LEFT_ALIGNMENT);
+		// Clipboard only — the exact backend target value, copied verbatim.
+		row.add(actionButton("Copy price",
+			() -> copy(String.valueOf(action.targetPrice))));
+		if (showCopyQuantity(action))
+		{
+			row.add(actionButton("Copy qty",
+				() -> copy(String.valueOf(action.targetQuantity))));
+		}
+		return row;
 	}
 
 	/**

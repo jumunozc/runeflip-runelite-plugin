@@ -445,14 +445,22 @@ public class RuneFlipCompanionPlugin extends Plugin
 		// client id is forwarded (v0.8.2 opt-in) so recommended actions know
 		// about this install's existing GE offers. Display only — the response
 		// is rendered verbatim, never acted on.
+		// Assisted Offer Setup opt-in (v0.8.3): read once per refresh and
+		// passed to the panel so its clipboard-only Copy buttons reflect the
+		// current config. OFF by default — display-only otherwise.
+		boolean assistedSetup = config.enableAssistedOfferSetup();
 		apiClient.fetchStrategyPreferences(url, clientId,
 			prefs -> apiClient.fetchFastFlipOverview(url,
 				RuneFlipApiClient.strategyQueryOf(prefs), clientId,
-				response -> SwingUtilities.invokeLater(() -> target.updateFastFlip(response)),
-				() -> SwingUtilities.invokeLater(() -> target.updateFastFlip(null))),
+				response -> SwingUtilities.invokeLater(
+					() -> target.updateFastFlip(response, assistedSetup)),
+				() -> SwingUtilities.invokeLater(
+					() -> target.updateFastFlip(null, assistedSetup))),
 			() -> apiClient.fetchFastFlipOverview(url, "", clientId,
-				response -> SwingUtilities.invokeLater(() -> target.updateFastFlip(response)),
-				() -> SwingUtilities.invokeLater(() -> target.updateFastFlip(null))));
+				response -> SwingUtilities.invokeLater(
+					() -> target.updateFastFlip(response, assistedSetup)),
+				() -> SwingUtilities.invokeLater(
+					() -> target.updateFastFlip(null, assistedSetup))));
 
 		apiClient.fetchCompletedAlerts(url, clientId,
 			response -> SwingUtilities.invokeLater(() -> target.updateCompleted(response)),

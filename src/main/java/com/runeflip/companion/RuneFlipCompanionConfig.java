@@ -95,6 +95,26 @@ public interface RuneFlipCompanionConfig extends Config
 		return true;
 	}
 
+	/**
+	 * Assisted Offer Setup (v0.8.3), OFF by default. When enabled, the Fast
+	 * Flip entries show clipboard-only "Copy target price" / "Copy qty"
+	 * buttons for recommended actions, so the player can paste the values
+	 * into the official GE interface themselves. It NEVER fills a field,
+	 * confirms, cancels, collects, or performs any input — RuneFlip may
+	 * assist input, but never execute intent. See
+	 * docs/anti-bot-compliance.md and docs/runelite-readonly-contract.md.
+	 */
+	@ConfigItem(
+		keyName = "enableAssistedOfferSetup",
+		name = "Assisted offer setup",
+		description = "Show clipboard-only Copy price/quantity buttons on Fast Flip actions. Prepares values only — you always review and confirm every offer manually in the official client. Never fills, confirms, cancels or collects.",
+		position = 9
+	)
+	default boolean enableAssistedOfferSetup()
+	{
+		return false;
+	}
+
 	@Range(min = 30)
 	@ConfigItem(
 		keyName = "panelRefreshSeconds",
@@ -118,7 +138,7 @@ public interface RuneFlipCompanionConfig extends Config
 		name = "Client id",
 		description = "Anonymous id that keeps your RuneFlip data separate from other users (generated automatically)",
 		hidden = true,
-		position = 9
+		position = 10
 	)
 	default String clientId()
 	{
@@ -135,7 +155,7 @@ public interface RuneFlipCompanionConfig extends Config
 		name = "Paired at",
 		description = "Set automatically when pairing completes (informational)",
 		hidden = true,
-		position = 10
+		position = 11
 	)
 	default String pairedAt()
 	{
