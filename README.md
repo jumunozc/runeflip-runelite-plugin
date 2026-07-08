@@ -1,21 +1,27 @@
 # RuneFlip Companion
 
-A strictly **read-only** RuneLite plugin that mirrors your 8 Grand Exchange
-slots to a [RuneFlip](https://github.com/jumunozc) flipping dashboard and
-shows the dashboard's market recommendations in a sidebar panel.
+A strictly **observation-only** RuneLite plugin that mirrors your 8 Grand
+Exchange slots to a [RuneFlip](https://github.com/jumunozc) flipping
+dashboard and shows the dashboard's market recommendations in a sidebar
+panel.
+
+RuneFlip is **manual-assisted, no botting**: it may assist input, but never
+execute intent — every Grand Exchange offer is reviewed and confirmed
+manually by you, in the official client.
 
 One-way by design: it observes `GrandExchangeOffer` through the official
 RuneLite plugin API and POSTs a JSON snapshot — the HTTP response is a bare
 acknowledgement that is only logged. There is no command channel.
 
-**It never** buys, sells, cancels or collects offers; never clicks, types or
-moves the mouse; never simulates input of any kind; never uses OCR, screen
-capture or pixel reading; never reads Jagex credentials or session data;
-never receives commands from the backend.
+**It never** confirms, buys, sells, cancels or collects offers —
+automatically or otherwise; never runs flipping loops; never clicks, types
+or moves the mouse; never simulates input of any kind; never uses OCR,
+screenshots, screen capture or pixel reading; never reads Jagex credentials
+or session data; never receives commands from the backend.
 
 ## What it does
 
-- **GE slot sync (read-only).** Mirrors the state of your 8 GE slots
+- **GE slot sync (observation-only).** Mirrors the state of your 8 GE slots
   (item, price, quantity, progress, status) to a RuneFlip backend so the
   dashboard can show them next to its market analysis. Sends only when a
   backend URL *and* an ingest token are configured — with either missing,
@@ -42,7 +48,7 @@ Open RuneLite → Configuration → **RuneFlip Companion**:
 | Sync enabled | Master switch for GE slot sync. | on (inert until URL + token are set) |
 | Heartbeat (seconds) | GE check cadence; unchanged snapshots are skipped. | 60 (min 30) |
 | Keepalive (minutes) | Re-send an unchanged snapshot after this long. | 5 (min 1) |
-| Capital sync (read-only) | Opt-in coins reporting described above. | **off** |
+| Capital sync (observation) | Opt-in coins reporting described above. | **off** |
 | Sidebar panel | Show the informational panel. | on |
 | Panel refresh (seconds) | Panel re-fetch cadence while open. | 60 (min 30) |
 
@@ -79,12 +85,14 @@ Only to the backend URL **you** configure, and only:
 No chat, no location, no skills, no inventory beyond coins, no friends
 list, no credentials — nothing else is read or transmitted.
 
-## Compliance (no-automation contract)
+## Compliance (manual-assisted / no-botting contract)
 
-This plugin is built against a hard read-only contract:
+Official rule: **RuneFlip is manual-assisted, no botting. It may assist
+input, but never execute intent.** This plugin is built against a hard
+observation-only contract:
 
 - No game actions of any kind — never buys, sells, cancels, collects or
-  confirms offers.
+  confirms offers, automatically or otherwise; no flipping loops.
 - No synthetic input — no `Robot`, no mouse/keyboard events, no menu
   invocation, no client scripts, no writing into the chatbox or GE search.
 - No OCR, screenshots, screen or pixel reading — data comes exclusively

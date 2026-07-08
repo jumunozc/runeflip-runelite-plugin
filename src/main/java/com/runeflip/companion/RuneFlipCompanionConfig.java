@@ -41,7 +41,7 @@ public interface RuneFlipCompanionConfig extends Config
 	@ConfigItem(
 		keyName = "syncEnabled",
 		name = "Sync enabled",
-		description = "Send read-only GE slot snapshots to the RuneFlip backend",
+		description = "Send one-way GE slot snapshots to the RuneFlip backend (observation only)",
 		position = 3
 	)
 	default boolean syncEnabled()
@@ -75,7 +75,7 @@ public interface RuneFlipCompanionConfig extends Config
 
 	@ConfigItem(
 		keyName = "capitalSyncEnabled",
-		name = "Capital sync (read-only)",
+		name = "Capital sync (observation)",
 		description = "Also send inventory coins, and bank coins as last seen when YOU open the bank. Observation only — nothing is ever acted on.",
 		position = 6
 	)

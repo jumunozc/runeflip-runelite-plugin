@@ -70,6 +70,9 @@ public class RuneFlipPanel extends PluginPanel
 	/** Shown verbatim when the backend omits its own disclaimer string. */
 	static final String FAST_FLIP_DISCLAIMER =
 		"Fast flip estimates are informational. Review manually before trading.";
+	/** Price Edge fallback disclaimer (v0.7.1), same rule as above. */
+	static final String PRICE_EDGE_DISCLAIMER =
+		"Targets are estimates. Review manually.";
 	/** Hard cap so one absurd name can never distort the narrow sidebar. */
 	private static final int MAX_NAME_CHARS = 40;
 
@@ -296,7 +299,7 @@ public class RuneFlipPanel extends PluginPanel
 		{
 			capitalLabel.setText(html(
 				"Capital: manual / default (enable Capital sync in the plugin "
-					+ "settings for a read-only estimate)"));
+					+ "settings for an observed estimate)"));
 			return;
 		}
 		StringBuilder sb = new StringBuilder("Capital");
@@ -378,6 +381,13 @@ public class RuneFlipPanel extends PluginPanel
 		String note = response.disclaimer != null && !response.disclaimer.trim().isEmpty()
 			? response.disclaimer.trim()
 			: FAST_FLIP_DISCLAIMER;
+		// When targets are shown, the price-edge disclaimer rides along —
+		// verbatim from the backend when it sent one.
+		String edgeNote = priceEdgeDisclaimer(flips, shown);
+		if (edgeNote != null)
+		{
+			note = note + " " + edgeNote;
+		}
 		JLabel fastFlipDisclaimer = new JLabel(html(safe(note)));
 		fastFlipDisclaimer.setFont(FontManager.getRunescapeSmallFont());
 		fastFlipDisclaimer.setForeground(MUTED);
@@ -421,7 +431,93 @@ public class RuneFlipPanel extends PluginPanel
 		speeds.setFont(FontManager.getRunescapeSmallFont());
 		entry.add(speeds);
 
+		// Price Edge targets (v0.7.1): two extra display-only lines with the
+		// backend's wiki-vs-target prices. Nothing here computes or acts.
+		String targetLine = priceEdgeTargetLine(flip.priceEdge);
+		if (targetLine != null)
+		{
+			JLabel target = new JLabel(html(targetLine));
+			target.setFont(FontManager.getRunescapeSmallFont());
+			entry.add(target);
+			String profitLine = priceEdgeProfitLine(flip.priceEdge);
+			if (profitLine != null)
+			{
+				JLabel profit = new JLabel(html(profitLine));
+				profit.setFont(FontManager.getRunescapeSmallFont());
+				entry.add(profit);
+			}
+		}
+
 		return entry;
+	}
+
+	/**
+	 * The price-edge disclaimer for the card footer: the first backend-sent
+	 * one among the shown entries, the fixed fallback when an entry has
+	 * targets but no text, and null when no entry has targets at all.
+	 */
+	static String priceEdgeDisclaimer(
+		List<RuneFlipData.FastFlipItem> flips, int shown)
+	{
+		if (flips == null)
+		{
+			return null;
+		}
+		boolean hasTargets = false;
+		for (int i = 0; i < Math.min(shown, flips.size()); i++)
+		{
+			RuneFlipData.PriceEdge edge = flips.get(i).priceEdge;
+			if (edge == null)
+			{
+				continue;
+			}
+			hasTargets = true;
+			if (edge.disclaimer != null && !edge.disclaimer.trim().isEmpty())
+			{
+				return edge.disclaimer.trim();
+			}
+		}
+		return hasTargets ? PRICE_EDGE_DISCLAIMER : null;
+	}
+
+	/**
+	 * First price-edge line: "Wiki buy 119 → quick buy 122 · target sell 129"
+	 * (or "Targets: not recommended"). Null when the backend sent no edge
+	 * block (pre-0.7.1) or no usable targets — the entry simply stays as-is.
+	 */
+	static String priceEdgeTargetLine(RuneFlipData.PriceEdge edge)
+	{
+		if (edge == null)
+		{
+			return null;
+		}
+		if (edge.recommendedBuyPrice == null || edge.recommendedSellPrice == null)
+		{
+			return "NOT_RECOMMENDED".equals(edge.recommendation)
+				? "<span style='color:#e26a5e'>Targets: not recommended</span>"
+				: null;
+		}
+		return "<span style='color:#878d9c'>Wiki buy</span> "
+			+ gpOrDash(edge.wikiLowPrice)
+			+ " <span style='color:#9fb6ef'>→ quick buy "
+			+ gpOrDash(edge.recommendedBuyPrice) + "</span>"
+			+ " <span style='color:#878d9c'>· target sell</span> "
+			+ gpOrDash(edge.recommendedSellPrice);
+	}
+
+	/** Second price-edge line: profit after tax + confidence at the target. */
+	static String priceEdgeProfitLine(RuneFlipData.PriceEdge edge)
+	{
+		if (edge == null || edge.profitPerItem == null)
+		{
+			return null;
+		}
+		return "<span style='color:#4cba86'>"
+			+ profitPerItemLabel(edge.profitPerItem)
+			+ "/item after tax</span>"
+			+ (edge.confidence != null
+				? " <span style='color:#878d9c'>· conf " + edge.confidence + "</span>"
+				: "");
 	}
 
 	/**

@@ -46,6 +46,27 @@ public class FastFlipMappingTest
 		+ "\"competitionRisk\": 0.33,"
 		+ "\"buyPressurePct\": 54.2,"
 		+ "\"topFlipScore\": 77.3,"
+		+ "\"priceEdge\": {"
+		+ "  \"wikiLowPrice\": 1712345,"
+		+ "  \"wikiHighPrice\": 1758000,"
+		+ "  \"spread\": 45655,"
+		+ "  \"safeBuyPrice\": 1712345,"
+		+ "  \"safeSellPrice\": 1758000,"
+		+ "  \"quickBuyPrice\": 1717345,"
+		+ "  \"quickSellPrice\": 1753000,"
+		+ "  \"buyEdgeGp\": 5000,"
+		+ "  \"sellEdgeGp\": 5000,"
+		+ "  \"recommendedBuyPrice\": 1717345,"
+		+ "  \"recommendedSellPrice\": 1753000,"
+		+ "  \"tax\": 35060,"
+		+ "  \"profitPerItem\": 595,"
+		+ "  \"roi\": 0.0003,"
+		+ "  \"recommendation\": \"QUICK\","
+		+ "  \"confidence\": 82,"
+		+ "  \"risk\": \"MEDIUM\","
+		+ "  \"reasons\": [\"Quick buy +5,000 gp\"],"
+		+ "  \"disclaimer\": \"Targets are estimates. Review manually.\""
+		+ "},"
 		+ "\"reasons\": [\"High volume\", \"Stable spread\"],"
 		+ "\"primaryReason\": \"High volume\","
 		+ "\"disclaimer\": \"Fast flip estimates are informational. Review manually before trading.\""
@@ -117,6 +138,24 @@ public class FastFlipMappingTest
 		assertEquals(2, flip.reasons.size());
 		assertEquals("High volume", flip.reasons.get(0));
 		assertEquals("High volume", flip.primaryReason);
+
+		RuneFlipData.PriceEdge edge = flip.priceEdge;
+		assertNotNull(edge);
+		assertEquals(Long.valueOf(1_712_345L), edge.wikiLowPrice);
+		assertEquals(Long.valueOf(1_758_000L), edge.wikiHighPrice);
+		assertEquals(Long.valueOf(45_655L), edge.spread);
+		assertEquals(Long.valueOf(1_717_345L), edge.quickBuyPrice);
+		assertEquals(Long.valueOf(1_753_000L), edge.quickSellPrice);
+		assertEquals(Long.valueOf(5_000L), edge.buyEdgeGp);
+		assertEquals(Long.valueOf(5_000L), edge.sellEdgeGp);
+		assertEquals(Long.valueOf(1_717_345L), edge.recommendedBuyPrice);
+		assertEquals(Long.valueOf(1_753_000L), edge.recommendedSellPrice);
+		assertEquals(Long.valueOf(35_060L), edge.tax);
+		assertEquals(Long.valueOf(595L), edge.profitPerItem);
+		assertEquals("QUICK", edge.recommendation);
+		assertEquals(Integer.valueOf(82), edge.confidence);
+		assertEquals("MEDIUM", edge.risk);
+		assertEquals("Targets are estimates. Review manually.", edge.disclaimer);
 		assertEquals(
 			"Fast flip estimates are informational. Review manually before trading.",
 			flip.disclaimer);
@@ -161,6 +200,8 @@ public class FastFlipMappingTest
 		assertEquals(Integer.valueOf(10), flip.confidence);
 		assertTrue(flip.reasons.isEmpty());
 		assertEquals("Insufficient history", flip.primaryReason);
+		// Pre-0.7.1 payloads simply omit priceEdge — it must stay null.
+		assertNull(flip.priceEdge);
 	}
 
 	@Test

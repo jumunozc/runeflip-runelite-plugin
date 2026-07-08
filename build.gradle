@@ -1,5 +1,6 @@
-// RuneFlip Companion — read-only RuneLite plugin. Built like the official
-// runelite/example-plugin template. Compliance guarantees: see README.md.
+// RuneFlip Companion — observation-only RuneLite plugin. Built like the
+// official runelite/example-plugin template. Compliance guarantees
+// (manual-assisted, no botting): see README.md.
 plugins {
     id 'java'
 }
@@ -22,7 +23,7 @@ dependencies {
 }
 
 group = 'com.runeflip'
-version = '0.7.0'
+version = '0.7.2'
 
 java {
     sourceCompatibility = JavaVersion.VERSION_11

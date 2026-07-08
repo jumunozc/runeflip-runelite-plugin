@@ -41,16 +41,19 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * RuneFlip Companion — a strictly READ-ONLY mirror of your Grand Exchange
- * slots (and, opt-in, passively observed capital), sent one-way to a
- * self-hosted RuneFlip dashboard.
+ * RuneFlip Companion — a strictly OBSERVATION-ONLY mirror of your Grand
+ * Exchange slots (and, opt-in, passively observed capital), sent one-way to
+ * a self-hosted RuneFlip dashboard. RuneFlip is manual-assisted, no botting:
+ * it may assist input, but never execute intent — every GE offer is
+ * reviewed and confirmed manually by the player.
  *
  * What this plugin never does (see docs/runelite-readonly-contract.md):
- * no buying, selling, cancelling or collecting; no clicks, keystrokes or
- * menu actions; no opening of any interface (bank/GE state is only read
- * when the USER opens them); no reading of credentials or session data; no
- * commands received from the backend (the HTTP response is a bare
- * acknowledgement that is only logged). It observes
+ * no buying, selling, cancelling, aborting or collecting — automatically or
+ * otherwise; no clicks, keystrokes or menu actions; no flipping loops; no
+ * opening of any interface (bank/GE state is only read when the USER opens
+ * them); no reading of credentials or session data; no commands received
+ * from the backend (the HTTP response is a bare acknowledgement that is
+ * only logged — no command-and-control channel exists). It observes
  * {@link GrandExchangeOffer} and official item containers through the
  * RuneLite API and POSTs JSON snapshots — that is all.
  *
@@ -62,7 +65,7 @@ import org.slf4j.LoggerFactory;
  */
 @PluginDescriptor(
 	name = "RuneFlip Companion",
-	description = "Read-only mirror of your GE slots to a self-hosted RuneFlip dashboard. Never performs game actions.",
+	description = "Manual-assisted flipping copilot: mirrors your GE slots to a self-hosted RuneFlip dashboard. Never performs game actions — you confirm every offer.",
 	tags = {"grand", "exchange", "ge", "flipping", "runeflip"}
 )
 public class RuneFlipCompanionPlugin extends Plugin
@@ -168,7 +171,7 @@ public class RuneFlipCompanionPlugin extends Plugin
 			clientToolbar.addNavigation(navButton);
 			refreshPanel();
 		}
-		log.info("RuneFlip Companion started (read-only; one-way snapshots only)");
+		log.info("RuneFlip Companion started (manual-assisted, no botting; one-way snapshots only)");
 	}
 
 	@Override

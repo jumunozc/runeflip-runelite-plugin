@@ -116,8 +116,41 @@ public final class RuneFlipData
 		public Double competitionRisk;
 		public Double buyPressurePct;
 		public Double topFlipScore;
+		/** Price Edge targets (v0.7.1); null on pre-0.7.1 backends. */
+		public PriceEdge priceEdge;
 		public List<String> reasons;
 		public String primaryReason;
+		public String disclaimer;
+	}
+
+	/**
+	 * Price Edge Model targets (v0.7.1). Backend-computed manual target
+	 * prices: safe = at the wiki legs, quick = inside the spread for a
+	 * faster fill, never past the backend's profit-after-tax floors. The
+	 * plugin renders these verbatim and never acts on them.
+	 */
+	public static class PriceEdge
+	{
+		public Long wikiLowPrice;
+		public Long wikiHighPrice;
+		public Long spread;
+		public Long safeBuyPrice;
+		public Long safeSellPrice;
+		public Long quickBuyPrice;
+		public Long quickSellPrice;
+		public Long buyEdgeGp;
+		public Long sellEdgeGp;
+		public Long recommendedBuyPrice;
+		public Long recommendedSellPrice;
+		public Long tax;
+		public Long profitPerItem;
+		public Double roi;
+		/** "QUICK" | "SAFE" | "NOT_RECOMMENDED". */
+		public String recommendation;
+		public Integer confidence;
+		/** "LOW" | "MEDIUM" | "HIGH" | "AVOID". */
+		public String risk;
+		public List<String> reasons;
 		public String disclaimer;
 	}
 

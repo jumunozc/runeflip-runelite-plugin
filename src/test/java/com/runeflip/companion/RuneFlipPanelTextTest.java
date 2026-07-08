@@ -53,6 +53,67 @@ public class RuneFlipPanelTextTest
 	}
 
 	@Test
+	public void priceEdgeTargetLineShowsWikiVsRuneFlipTargets()
+	{
+		RuneFlipData.PriceEdge edge = new RuneFlipData.PriceEdge();
+		edge.wikiLowPrice = 119L;
+		edge.wikiHighPrice = 130L;
+		edge.recommendedBuyPrice = 122L;
+		edge.recommendedSellPrice = 129L;
+		edge.profitPerItem = 5L;
+		edge.confidence = 84;
+		edge.recommendation = "QUICK";
+
+		String line = RuneFlipPanel.priceEdgeTargetLine(edge);
+		assertTrue(line.contains("Wiki buy"));
+		assertTrue(line.contains("119 gp"));
+		assertTrue(line.contains("quick buy 122 gp"));
+		assertTrue(line.contains("target sell"));
+		assertTrue(line.contains("129 gp"));
+
+		String profit = RuneFlipPanel.priceEdgeProfitLine(edge);
+		assertTrue(profit.contains("+5 gp/item after tax"));
+		assertTrue(profit.contains("conf 84"));
+	}
+
+	@Test
+	public void priceEdgeLinesDegradeHonestly()
+	{
+		// Pre-0.7.1 backend: no block at all — nothing extra is rendered.
+		assertEquals(null, RuneFlipPanel.priceEdgeTargetLine(null));
+		assertEquals(null, RuneFlipPanel.priceEdgeProfitLine(null));
+
+		// NOT_RECOMMENDED: recommended prices are null — say so, never invent.
+		RuneFlipData.PriceEdge notRecommended = new RuneFlipData.PriceEdge();
+		notRecommended.recommendation = "NOT_RECOMMENDED";
+		String line = RuneFlipPanel.priceEdgeTargetLine(notRecommended);
+		assertTrue(line.contains("not recommended"));
+		assertEquals(null, RuneFlipPanel.priceEdgeProfitLine(notRecommended));
+	}
+
+	@Test
+	public void priceEdgeDisclaimerPrefersTheBackendText()
+	{
+		RuneFlipData.FastFlipItem withEdge = new RuneFlipData.FastFlipItem();
+		withEdge.priceEdge = new RuneFlipData.PriceEdge();
+		withEdge.priceEdge.disclaimer = "Targets are estimates. Review manually.";
+		RuneFlipData.FastFlipItem withoutEdge = new RuneFlipData.FastFlipItem();
+
+		assertEquals("Targets are estimates. Review manually.",
+			RuneFlipPanel.priceEdgeDisclaimer(
+				java.util.Arrays.asList(withoutEdge, withEdge), 2));
+		// Targets without text fall back to the fixed disclaimer.
+		withEdge.priceEdge.disclaimer = null;
+		assertEquals(RuneFlipPanel.PRICE_EDGE_DISCLAIMER,
+			RuneFlipPanel.priceEdgeDisclaimer(
+				java.util.Arrays.asList(withEdge), 1));
+		// No targets at all: no extra disclaimer line.
+		assertEquals(null, RuneFlipPanel.priceEdgeDisclaimer(
+			java.util.Arrays.asList(withoutEdge), 1));
+		assertEquals(null, RuneFlipPanel.priceEdgeDisclaimer(null, 3));
+	}
+
+	@Test
 	public void shortTimeAgoUsesCompactUnits()
 	{
 		long now = Instant.parse("2026-07-06T12:00:00Z").toEpochMilli();
