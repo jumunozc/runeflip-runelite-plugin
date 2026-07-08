@@ -53,10 +53,79 @@ public class RuneFlipApiClient
 		Consumer<RuneFlipData.FastFlipOverviewResponse> onSuccess,
 		Runnable onFailure)
 	{
-		// Public market data: no client id required. The response is
-		// display-only — the plugin renders it and never acts on it.
-		get(backendUrl, "/fast-flip/overview?limit=3", null,
+		fetchFastFlipOverview(backendUrl, "", null, onSuccess, onFailure);
+	}
+
+	/**
+	 * Overview with optional Strategy Engine params (v0.8.1) appended — the
+	 * query string comes from {@link #strategyQueryOf} (saved preferences) and
+	 * is empty for the default strategy. The client id is a v0.8.2 opt-in:
+	 * fast-flip is public, but sending this install's anonymous id lets the
+	 * backend's recommended actions know about THIS client's existing GE
+	 * offers (the slotInsights block). The response is display-only — the
+	 * plugin renders it, never acts on it.
+	 */
+	public void fetchFastFlipOverview(
+		String backendUrl,
+		String strategyQuery,
+		String clientId,
+		Consumer<RuneFlipData.FastFlipOverviewResponse> onSuccess,
+		Runnable onFailure)
+	{
+		String query = strategyQuery == null ? "" : strategyQuery;
+		get(backendUrl, "/fast-flip/overview?limit=3" + query, clientId,
 			RuneFlipData.FastFlipOverviewResponse.class, onSuccess, onFailure);
+	}
+
+	/**
+	 * This install's saved strategy preferences (v0.8.1) — private, scoped by
+	 * the anonymous client id. A failing fetch (offline, or a pre-0.8.1
+	 * backend answering 404) simply means the default strategy applies.
+	 */
+	public void fetchStrategyPreferences(
+		String backendUrl,
+		String clientId,
+		Consumer<RuneFlipData.StrategyPreferencesResponse> onSuccess,
+		Runnable onFailure)
+	{
+		get(backendUrl, "/strategy/preferences", clientId,
+			RuneFlipData.StrategyPreferencesResponse.class, onSuccess, onFailure);
+	}
+
+	/**
+	 * Saved preferences → overview query params. Defensive: only whitelisted
+	 * risk values and in-range numbers ever reach the URL, and anything else
+	 * (nothing saved, malformed, pre-0.8.1 shapes) yields the empty string —
+	 * i.e. the backend's default strategy.
+	 */
+	static String strategyQueryOf(RuneFlipData.StrategyPreferencesResponse response)
+	{
+		if (response == null || response.preferences == null
+			|| !Boolean.TRUE.equals(response.saved))
+		{
+			return "";
+		}
+		RuneFlipData.StrategyPreferences p = response.preferences;
+		StringBuilder query = new StringBuilder();
+		if (p.timeframeMinutes != null && p.timeframeMinutes >= 1
+			&& p.timeframeMinutes <= 1440)
+		{
+			query.append("&timeframeMinutes=").append(p.timeframeMinutes);
+		}
+		if ("LOW".equals(p.riskLevel) || "MEDIUM".equals(p.riskLevel)
+			|| "HIGH".equals(p.riskLevel))
+		{
+			query.append("&riskLevel=").append(p.riskLevel);
+		}
+		if (p.minPredictedProfit != null && p.minPredictedProfit >= 0)
+		{
+			query.append("&minPredictedProfit=").append(p.minPredictedProfit);
+		}
+		if (p.minRoi != null && p.minRoi >= 0 && p.minRoi <= 1)
+		{
+			query.append("&minRoi=").append(p.minRoi);
+		}
+		return query.toString();
 	}
 
 	public void fetchCapital(

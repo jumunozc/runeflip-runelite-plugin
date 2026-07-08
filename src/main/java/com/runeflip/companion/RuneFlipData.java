@@ -71,6 +71,11 @@ public final class RuneFlipData
 		public List<FastFlipItem> fastSell;
 		public List<FastFlipItem> topFlips;
 		public FastFlipCoverage coverage;
+		/** Insights for this client's existing offers (v0.8.2); null on
+		 *  pre-0.8.2 backends, empty without a paired client or active offers. */
+		public List<GeSlotActionInsight> slotInsights;
+		/** Applied strategy echo (v0.8.0); null on pre-0.8.0 backends. */
+		public FastFlipStrategy strategy;
 		public String disclaimer;
 	}
 
@@ -80,6 +85,48 @@ public final class RuneFlipData
 		public Integer itemsWithData;
 		public Integer excludedAvoid;
 		public Integer excludedInsufficientData;
+		/** Rankable items excluded by the strategy (v0.8.0); may be null. */
+		public Integer excludedByStrategy;
+	}
+
+	/**
+	 * Strategy Engine echo (v0.8.0). Pure display metadata about how the
+	 * backend ranked/filtered this response — the plugin renders the
+	 * backend-built description verbatim and never derives or acts on it.
+	 */
+	public static class FastFlipStrategy
+	{
+		public Integer timeframeMinutes;
+		/** "LOW" | "MEDIUM" | "HIGH" (maximum accepted risk). */
+		public String riskLevel;
+		public Long minPredictedProfit;
+		public Double minRoi;
+		public Boolean isDefault;
+		/** Backend-built summary, e.g. "8h timeframe · risk up to HIGH". */
+		public String description;
+	}
+
+	/**
+	 * GET /strategy/preferences response (v0.8.1): the strategy this install
+	 * saved from web/mobile, scoped to the anonymous clientId. The plugin only
+	 * forwards it as query params on the overview fetch so the Fast Flip card
+	 * reflects the saved strategy — display preferences, never an action.
+	 */
+	public static class StrategyPreferencesResponse
+	{
+		public StrategyPreferences preferences;
+		/** False => nothing saved yet; the plugin keeps the default strategy. */
+		public Boolean saved;
+		public String updatedAt;
+	}
+
+	public static class StrategyPreferences
+	{
+		public Integer timeframeMinutes;
+		/** "LOW" | "MEDIUM" | "HIGH" (maximum accepted risk). */
+		public String riskLevel;
+		public Long minPredictedProfit;
+		public Double minRoi;
 	}
 
 	/** One backend-computed fast-flip candidate. Boxed types: any may be null. */
@@ -118,9 +165,46 @@ public final class RuneFlipData
 		public Double topFlipScore;
 		/** Price Edge targets (v0.7.1); null on pre-0.7.1 backends. */
 		public PriceEdge priceEdge;
+		/** Recommended action (v0.8.2); null on pre-0.8.2 backends. */
+		public RecommendedAction action;
 		public List<String> reasons;
 		public String primaryReason;
 		public String disclaimer;
+	}
+
+	/**
+	 * Recommendation Actions v0.8.2 — a backend-computed suggestion of WHAT to
+	 * review for one item. Compliance rule: RuneFlip may assist input, but
+	 * never execute intent. The plugin renders the label/reason verbatim and
+	 * never turns it into a game action (reviewOnly is always true).
+	 */
+	public static class RecommendedAction
+	{
+		/** BUY_NEW | SELL_EXISTING | HOLD | MODIFY_BUY | MODIFY_SELL |
+		 *  ABORT_BUY | ABORT_SELL | AVOID. */
+		public String actionType;
+		public String actionLabel;
+		public String actionReason;
+		public Boolean reviewOnly;
+	}
+
+	/**
+	 * Read-only insight for one EXISTING offer of the paired client (v0.8.2).
+	 * Observations in, suggestions out — never a command. Only present when
+	 * the plugin is paired and the backend has fast-flip data for the offer.
+	 */
+	public static class GeSlotActionInsight
+	{
+		public int slot;
+		public int itemId;
+		public String itemName;
+		public String iconUrl;
+		/** "BUY" | "SELL". */
+		public String offerType;
+		public Long offerPrice;
+		public Long quantity;
+		public Long quantityFilled;
+		public RecommendedAction action;
 	}
 
 	/**

@@ -114,6 +114,75 @@ public class RuneFlipPanelTextTest
 	}
 
 	@Test
+	public void strategySummaryRendersTheBackendDescriptionVerbatim()
+	{
+		RuneFlipData.FastFlipStrategy strategy = new RuneFlipData.FastFlipStrategy();
+		strategy.timeframeMinutes = 30;
+		strategy.riskLevel = "MEDIUM";
+		strategy.isDefault = Boolean.FALSE;
+		strategy.description = "30m timeframe · risk up to MEDIUM";
+
+		assertEquals("Strategy: 30m timeframe · risk up to MEDIUM",
+			RuneFlipPanel.strategySummaryLine(strategy));
+
+		// Pre-0.8.0 backend (no echo) or an empty description: no line at all.
+		assertEquals(null, RuneFlipPanel.strategySummaryLine(null));
+		strategy.description = "   ";
+		assertEquals(null, RuneFlipPanel.strategySummaryLine(strategy));
+	}
+
+	@Test
+	public void actionLineRendersLabelAndReasonVerbatimWithTypeColor()
+	{
+		RuneFlipData.RecommendedAction action = new RuneFlipData.RecommendedAction();
+		action.actionType = "MODIFY_BUY";
+		action.actionLabel = "Modify buy";
+		action.actionReason = "Buy offer at 9,000 gp sits below the recommended 10,050 gp.";
+		action.reviewOnly = Boolean.TRUE;
+
+		String line = RuneFlipPanel.actionLine(action);
+		assertTrue(line.contains("Action:"));
+		assertTrue(line.contains("<b>Modify buy</b>"));
+		assertTrue(line.contains("9,000 gp"));
+		assertTrue(line.contains("10,050 gp"));
+		// MODIFY_* renders in the gold "review" tone.
+		assertTrue(line.contains("#e3b75d"));
+	}
+
+	@Test
+	public void actionLineDegradesHonestly()
+	{
+		// Pre-0.8.2 backend: no action block — nothing extra is rendered.
+		assertEquals(null, RuneFlipPanel.actionLine(null));
+
+		// An empty label produces no line (never an "Action:" with no verb).
+		RuneFlipData.RecommendedAction blank = new RuneFlipData.RecommendedAction();
+		blank.actionLabel = "   ";
+		assertEquals(null, RuneFlipPanel.actionLine(blank));
+
+		// A label without a reason still renders, just without the "— …" tail.
+		RuneFlipData.RecommendedAction labelOnly = new RuneFlipData.RecommendedAction();
+		labelOnly.actionType = "HOLD";
+		labelOnly.actionLabel = "Hold";
+		String line = RuneFlipPanel.actionLine(labelOnly);
+		assertTrue(line.contains("<b>Hold</b>"));
+		assertFalse(line.contains("—"));
+	}
+
+	@Test
+	public void actionColorsMapByTypeAndFallBackToMuted()
+	{
+		assertEquals("#4cba86", RuneFlipPanel.actionColorHex("BUY_NEW"));
+		assertEquals("#9fb6ef", RuneFlipPanel.actionColorHex("SELL_EXISTING"));
+		assertEquals("#9fb6ef", RuneFlipPanel.actionColorHex("HOLD"));
+		assertEquals("#e3b75d", RuneFlipPanel.actionColorHex("MODIFY_SELL"));
+		assertEquals("#e26a5e", RuneFlipPanel.actionColorHex("ABORT_BUY"));
+		assertEquals("#e26a5e", RuneFlipPanel.actionColorHex("AVOID"));
+		assertEquals("#878d9c", RuneFlipPanel.actionColorHex(null));
+		assertEquals("#878d9c", RuneFlipPanel.actionColorHex("BANANA"));
+	}
+
+	@Test
 	public void shortTimeAgoUsesCompactUnits()
 	{
 		long now = Instant.parse("2026-07-06T12:00:00Z").toEpochMilli();

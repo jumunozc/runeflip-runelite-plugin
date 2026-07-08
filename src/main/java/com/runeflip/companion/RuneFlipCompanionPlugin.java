@@ -439,11 +439,20 @@ public class RuneFlipCompanionPlugin extends Plugin
 				}
 			}));
 
-		// Fast Flip card (v0.7.0): same cadence as the rest of the panel.
-		// Display only — the response is rendered verbatim, never acted on.
-		apiClient.fetchFastFlipOverview(url,
-			response -> SwingUtilities.invokeLater(() -> target.updateFastFlip(response)),
-			() -> SwingUtilities.invokeLater(() -> target.updateFastFlip(null)));
+		// Fast Flip card (v0.7.0) honoring this install's saved strategy
+		// preferences (v0.8.1): the private prefs fetch runs first; an old
+		// backend or a failed fetch falls back to the default strategy. The
+		// client id is forwarded (v0.8.2 opt-in) so recommended actions know
+		// about this install's existing GE offers. Display only — the response
+		// is rendered verbatim, never acted on.
+		apiClient.fetchStrategyPreferences(url, clientId,
+			prefs -> apiClient.fetchFastFlipOverview(url,
+				RuneFlipApiClient.strategyQueryOf(prefs), clientId,
+				response -> SwingUtilities.invokeLater(() -> target.updateFastFlip(response)),
+				() -> SwingUtilities.invokeLater(() -> target.updateFastFlip(null))),
+			() -> apiClient.fetchFastFlipOverview(url, "", clientId,
+				response -> SwingUtilities.invokeLater(() -> target.updateFastFlip(response)),
+				() -> SwingUtilities.invokeLater(() -> target.updateFastFlip(null))));
 
 		apiClient.fetchCompletedAlerts(url, clientId,
 			response -> SwingUtilities.invokeLater(() -> target.updateCompleted(response)),

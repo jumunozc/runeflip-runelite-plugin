@@ -358,6 +358,19 @@ public class RuneFlipPanel extends PluginPanel
 		int shown = flips == null ? 0 : Math.min(flips.size(), MAX_FAST_FLIP_ROWS);
 		fastFlipHeader.setText("Fast flip · " + shown);
 
+		// Strategy Engine summary (v0.8.0): the backend-built description of
+		// how this list was ranked/filtered — display only, verbatim.
+		String strategySummary = strategySummaryLine(
+			response == null ? null : response.strategy);
+		if (strategySummary != null)
+		{
+			JLabel strategyLine = new JLabel(html(safe(strategySummary)));
+			strategyLine.setFont(FontManager.getRunescapeSmallFont());
+			strategyLine.setForeground(MUTED);
+			fastFlipCard.add(strategyLine);
+			fastFlipCard.add(Box.createVerticalStrut(4));
+		}
+
 		if (shown == 0)
 		{
 			JLabel none = new JLabel(html("No fast flips qualify right now."));
@@ -431,6 +444,16 @@ public class RuneFlipPanel extends PluginPanel
 		speeds.setFont(FontManager.getRunescapeSmallFont());
 		entry.add(speeds);
 
+		// Recommended action (v0.8.2): one display-only "Action: <label> —
+		// <reason>" line. reviewOnly by contract — never a game interaction.
+		String actionLine = actionLine(flip.action);
+		if (actionLine != null)
+		{
+			JLabel action = new JLabel(html(actionLine));
+			action.setFont(FontManager.getRunescapeSmallFont());
+			entry.add(action);
+		}
+
 		// Price Edge targets (v0.7.1): two extra display-only lines with the
 		// backend's wiki-vs-target prices. Nothing here computes or acts.
 		String targetLine = priceEdgeTargetLine(flip.priceEdge);
@@ -449,6 +472,77 @@ public class RuneFlipPanel extends PluginPanel
 		}
 
 		return entry;
+	}
+
+	/**
+	 * Recommended-action line (v0.8.2): "Action: <label> — <reason>", both
+	 * verbatim from the backend, colored by the action type. Null when the
+	 * backend sent no action (pre-0.8.2) or an empty label. Display only: this
+	 * is a suggestion to REVIEW manually, never a game interaction.
+	 */
+	static String actionLine(RuneFlipData.RecommendedAction action)
+	{
+		if (action == null || action.actionLabel == null
+			|| action.actionLabel.trim().isEmpty())
+		{
+			return null;
+		}
+		String color = actionColorHex(action.actionType);
+		StringBuilder sb = new StringBuilder();
+		sb.append("<span style='color:#878d9c'>Action:</span> ");
+		sb.append("<span style='color:").append(color).append("'><b>");
+		sb.append(safe(action.actionLabel.trim())).append("</b></span>");
+		if (action.actionReason != null && !action.actionReason.trim().isEmpty())
+		{
+			sb.append(" <span style='color:#878d9c'>— ");
+			sb.append(safe(action.actionReason.trim())).append("</span>");
+		}
+		return sb.toString();
+	}
+
+	/**
+	 * Recommended-action type → label color hex. BUY/keep tones green, review
+	 * tones gold, abort/avoid tones red; anything unexpected stays neutral —
+	 * the plugin never guesses an action itself.
+	 */
+	static String actionColorHex(String actionType)
+	{
+		if (actionType == null)
+		{
+			return "#878d9c";
+		}
+		switch (actionType)
+		{
+			case "BUY_NEW":
+				return "#4cba86";
+			case "SELL_EXISTING":
+			case "HOLD":
+				return "#9fb6ef";
+			case "MODIFY_BUY":
+			case "MODIFY_SELL":
+				return "#e3b75d";
+			case "ABORT_BUY":
+			case "ABORT_SELL":
+			case "AVOID":
+				return "#e26a5e";
+			default:
+				return "#878d9c";
+		}
+	}
+
+	/**
+	 * Strategy Engine summary line (v0.8.0): "Strategy: <backend description>",
+	 * verbatim, or null when the backend sent no strategy echo (pre-0.8.0) or
+	 * an empty description — nothing is ever derived client-side.
+	 */
+	static String strategySummaryLine(RuneFlipData.FastFlipStrategy strategy)
+	{
+		if (strategy == null || strategy.description == null
+			|| strategy.description.trim().isEmpty())
+		{
+			return null;
+		}
+		return "Strategy: " + strategy.description.trim();
 	}
 
 	/**
