@@ -10,17 +10,18 @@ import static org.junit.Assert.assertTrue;
 
 /**
  * GET /fast-flip/item/:itemId JSON → DTO mapping and the panel's selected-item
- * text helpers (v0.8.4). The plugin renders every figure and every comparison
- * string verbatim, so the mapping must survive both a recommended item and the
- * honest "no target yet" degradation without inventing anything.
+ * text helpers (v0.8.4, comparison fixed in v0.8.5). The plugin renders every
+ * figure and comparison string verbatim, so the mapping must survive both a
+ * recommended item and the honest "no target yet" degradation, and the buy/sell
+ * lines must anchor to the wiki low / high legs correctly.
  */
 public class ItemContextMappingTest
 {
 	private final Gson gson = new Gson();
 
 	// Small prices on purpose: the panel formats gp via quantityToStackSize,
-	// which is exact only below 10,000 (10,300 would render "10K"). The same
-	// convention the existing panel-text tests use.
+	// exact only below 10,000. Market low 119 (insta-sell) / high 130 (insta-buy);
+	// quick pair buys at 122 (+3 above low) and sells at 127 (−3 below high).
 	private static final String RECOMMENDED_JSON = "{"
 		+ "\"generatedAt\": \"2026-07-09T12:00:00.000Z\","
 		+ "\"itemId\": 561,"
@@ -45,13 +46,16 @@ public class ItemContextMappingTest
 		+ "  \"targetPrice\": 122, \"targetQuantity\": 100, \"targetSource\": \"Price Edge recommended buy\""
 		+ "},"
 		+ "\"targetComparison\": {"
+		+ "  \"wikiLow\": 119, \"wikiHigh\": 130,"
+		+ "  \"targetBuy\": 122, \"targetSell\": 127,"
+		+ "  \"buyDeltaVsWikiLow\": 3, \"sellDeltaVsWikiHigh\": -3,"
+		+ "  \"extraEdgePerItem\": 3, \"potentialExtraProfit\": 300,"
+		+ "  \"buyMessage\": \"Target is 3 gp above Wiki low for faster fill\","
+		+ "  \"sellMessage\": \"Target is 3 gp below Wiki high for faster fill\","
+		+ "  \"guidance\": \"Use lower buy for margin, higher sell if you can wait. Review manually.\","
 		+ "  \"wikiBuyPrice\": 130, \"wikiSellPrice\": 119,"
 		+ "  \"recommendedBuyPrice\": 122, \"recommendedSellPrice\": 127,"
-		+ "  \"buyDelta\": 8, \"sellDelta\": 8,"
-		+ "  \"extraEdgePerItem\": 16, \"potentialExtraProfit\": 1600,"
-		+ "  \"buyMessage\": \"Try buying 8 gp cheaper than Wiki\","
-		+ "  \"sellMessage\": \"Try selling 8 gp higher than Wiki\","
-		+ "  \"guidance\": \"Use lower buy for margin, higher sell if you can wait. Review manually.\""
+		+ "  \"buyDelta\": 3, \"sellDelta\": -3"
 		+ "},"
 		+ "\"expectedProfit\": 300, \"expectedDurationMinutes\": 18.0, \"roi\": 0.0245,"
 		+ "\"cost\": 12200, \"suggestedQuantity\": 100,"
@@ -78,41 +82,42 @@ public class ItemContextMappingTest
 
 		RuneFlipData.TargetComparison tc = res.targetComparison;
 		assertNotNull(tc);
-		// Wiki buy = instant-buy (high leg); wiki sell = instant-sell (low leg).
-		assertEquals(Long.valueOf(130L), tc.wikiBuyPrice);
-		assertEquals(Long.valueOf(119L), tc.wikiSellPrice);
-		assertEquals(Long.valueOf(8L), tc.buyDelta);
-		assertEquals(Long.valueOf(8L), tc.sellDelta);
-		assertEquals(Long.valueOf(16L), tc.extraEdgePerItem);
-		assertEquals(Long.valueOf(1_600L), tc.potentialExtraProfit);
+		// Buy anchored to the wiki LOW leg, sell to the wiki HIGH leg (v0.8.5).
+		assertEquals(Long.valueOf(119L), tc.wikiLow);
+		assertEquals(Long.valueOf(130L), tc.wikiHigh);
+		assertEquals(Long.valueOf(122L), tc.targetBuy);
+		assertEquals(Long.valueOf(127L), tc.targetSell);
+		assertEquals(Long.valueOf(3L), tc.buyDeltaVsWikiLow);
+		assertEquals(Long.valueOf(-3L), tc.sellDeltaVsWikiHigh);
+		assertEquals(Long.valueOf(3L), tc.extraEdgePerItem);
+		assertEquals(Long.valueOf(300L), tc.potentialExtraProfit);
 	}
 
 	@Test
-	public void panelRendersTheWikiVsRuneFlipComparisonVerbatim()
+	public void panelRendersTheWikiVsRuneFlipComparisonAnchoredCorrectly()
 	{
 		RuneFlipData.FastFlipItemContextResponse res =
 			gson.fromJson(RECOMMENDED_JSON, RuneFlipData.FastFlipItemContextResponse.class);
 
-		// Not-recommended line is absent for a recommended item.
 		assertNull(RuneFlipPanel.noRuneFlipTargetLine(res));
 
+		// Buy line references the wiki LOW leg, sell line the wiki HIGH leg.
 		String buy = RuneFlipPanel.contextComparisonBuyLine(res.targetComparison);
-		assertTrue(buy.contains("Try buying 8 gp cheaper than Wiki"));
+		assertTrue(buy.contains("Target is 3 gp above Wiki low for faster fill"));
 		String sell = RuneFlipPanel.contextComparisonSellLine(res.targetComparison);
-		assertTrue(sell.contains("Try selling 8 gp higher than Wiki"));
+		assertTrue(sell.contains("Target is 3 gp below Wiki high for faster fill"));
 
-		String wikiVsTarget = RuneFlipPanel.wikiTargetPricesLine(res.targetComparison);
-		assertTrue(wikiVsTarget.contains("130 gp")); // wiki instant-buy (high)
-		assertTrue(wikiVsTarget.contains("119 gp")); // wiki instant-sell (low)
-		assertTrue(wikiVsTarget.contains("target buy 122 gp"));
-		assertTrue(wikiVsTarget.contains("sell 127 gp"));
+		// Compact Wiki legs + RuneFlip targets lines (v0.8.5).
+		String wiki = RuneFlipPanel.wikiLegsLine(res.targetComparison);
+		assertTrue(wiki.contains("L 119 gp"));
+		assertTrue(wiki.contains("H 130 gp"));
+		String targets = RuneFlipPanel.runeFlipTargetsLine(res.targetComparison);
+		assertTrue(targets.contains("buy 122 gp"));
+		assertTrue(targets.contains("sell 127 gp"));
 
 		String extra = RuneFlipPanel.contextExtraProfitLine(res.targetComparison);
-		assertTrue(extra.contains("+16 gp/item"));
+		assertTrue(extra.contains("+3 gp/item"));
 		assertTrue(extra.contains("for qty"));
-
-		String guidance = RuneFlipPanel.contextGuidanceLine(res.targetComparison);
-		assertTrue(guidance.contains("Use lower buy for margin"));
 
 		assertTrue(RuneFlipPanel.safeQuickLine(res.priceEdge).contains("Safe"));
 		assertEquals("~18m", RuneFlipPanel.durationLabel(res.expectedDurationMinutes));
@@ -127,9 +132,9 @@ public class ItemContextMappingTest
 			+ "\"notRecommendedReason\": \"No RuneFlip target yet — this item has no recent price or feature data.\","
 			+ "\"priceEdge\": {\"wikiLowPrice\": null, \"wikiHighPrice\": null, \"recommendation\": \"NOT_RECOMMENDED\"},"
 			+ "\"targetComparison\": {"
-			+ "  \"wikiBuyPrice\": null, \"wikiSellPrice\": null,"
-			+ "  \"recommendedBuyPrice\": null, \"recommendedSellPrice\": null,"
-			+ "  \"buyDelta\": null, \"sellDelta\": null,"
+			+ "  \"wikiLow\": null, \"wikiHigh\": null,"
+			+ "  \"targetBuy\": null, \"targetSell\": null,"
+			+ "  \"buyDeltaVsWikiLow\": null, \"sellDeltaVsWikiHigh\": null,"
 			+ "  \"buyMessage\": \"No RuneFlip buy target yet\","
 			+ "  \"sellMessage\": \"No RuneFlip sell target yet\","
 			+ "  \"guidance\": \"Use lower buy for margin, higher sell if you can wait. Review manually.\""
@@ -145,20 +150,20 @@ public class ItemContextMappingTest
 		assertNotNull(noTarget);
 		assertTrue(noTarget.contains("No RuneFlip target yet"));
 		assertTrue(noTarget.contains("no recent price"));
-		// No qty-scaled edge when there is no target.
+		// No qty-scaled edge and no target lines when there is no target.
 		assertNull(RuneFlipPanel.contextExtraProfitLine(res.targetComparison));
+		assertNull(RuneFlipPanel.runeFlipTargetsLine(res.targetComparison));
 		assertEquals("—", RuneFlipPanel.durationLabel(res.expectedDurationMinutes));
 	}
 
 	@Test
 	public void preV084PayloadLeavesComparisonHelpersNull()
 	{
-		// A backend without the comparison block: every helper degrades to null.
-		assertNull(RuneFlipPanel.wikiTargetPricesLine(null));
+		assertNull(RuneFlipPanel.wikiLegsLine(null));
+		assertNull(RuneFlipPanel.runeFlipTargetsLine(null));
 		assertNull(RuneFlipPanel.contextComparisonBuyLine(null));
 		assertNull(RuneFlipPanel.contextComparisonSellLine(null));
 		assertNull(RuneFlipPanel.contextExtraProfitLine(null));
-		assertNull(RuneFlipPanel.contextGuidanceLine(null));
 		assertNull(RuneFlipPanel.safeQuickLine(null));
 		assertNull(RuneFlipPanel.noRuneFlipTargetLine(null));
 	}

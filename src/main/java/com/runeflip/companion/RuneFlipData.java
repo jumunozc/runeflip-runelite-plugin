@@ -294,17 +294,28 @@ public final class RuneFlipData
 	 */
 	public static class TargetComparison
 	{
+		// Correctly-anchored fields (v0.8.5): a flip buys near the wiki LOW leg
+		// (recent insta-sell) and sells near the wiki HIGH leg (recent insta-buy).
+		public Long wikiLow;
+		public Long wikiHigh;
+		public Long targetBuy;
+		public Long targetSell;
+		public Long buyDeltaVsWikiLow;
+		public Long sellDeltaVsWikiHigh;
+		public Long extraEdgePerItem;
+		public Long potentialExtraProfit;
+		public String buyMessage;
+		public String sellMessage;
+		public String guidance;
+
+		// Deprecated v0.8.4 aliases (still sent by the backend for pre-v0.8.5
+		// clients; not used by the panel anymore).
 		public Long wikiBuyPrice;
 		public Long wikiSellPrice;
 		public Long recommendedBuyPrice;
 		public Long recommendedSellPrice;
 		public Long buyDelta;
 		public Long sellDelta;
-		public Long extraEdgePerItem;
-		public Long potentialExtraProfit;
-		public String buyMessage;
-		public String sellMessage;
-		public String guidance;
 	}
 
 	/** Body of POST /pairing/complete — just the user-pasted code. */

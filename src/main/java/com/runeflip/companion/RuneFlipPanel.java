@@ -71,6 +71,13 @@ public class RuneFlipPanel extends PluginPanel
 	 *  Fast Flip update. OFF by default — Copy buttons stay hidden. */
 	private boolean assistedSetupEnabled = false;
 
+	/** Context-aware GE panel opt-in (v0.8.5), refreshed from config. When ON,
+	 *  the panel is focused: only the selected-item card OR the Top 3, never the
+	 *  legacy dashboard or GE completed. OFF keeps the full legacy panel. */
+	private boolean contextualMode = false;
+	/** Whether an item is currently open in the GE Buy/Sell setup (v0.8.5). */
+	private boolean hasSelection = false;
+
 	/** Rows shown in the compact completed summary; the rest is "+n more". */
 	private static final int MAX_COMPLETED_ROWS = 3;
 	/** Entries shown in the compact Fast Flip card (backend sends up to 3). */
@@ -85,6 +92,8 @@ public class RuneFlipPanel extends PluginPanel
 	static final String ASSISTED_SETUP_NOTE =
 		"Assisted setup prepares values only. You must review and confirm "
 			+ "manually.";
+	/** Short contextual-card footer (v0.8.5) — the compliance rule, compact. */
+	static final String SHORT_DISCLAIMER = "Review manually.";
 	/** Hard cap so one absurd name can never distort the narrow sidebar. */
 	private static final int MAX_NAME_CHARS = 40;
 
@@ -365,13 +374,9 @@ public class RuneFlipPanel extends PluginPanel
 			clearSelectedItem();
 			return;
 		}
+		this.hasSelection = true;
 		buildSelectedCard(response, assistedSetup);
-		selectedHeader.setVisible(true);
-		selectedCard.setVisible(true);
-		// While an item is selected, the item context replaces the Top-3 list.
-		fastFlipHeader.setVisible(false);
-		fastFlipCard.setVisible(false);
-		revalidateAll();
+		applyVisibility();
 	}
 
 	/** Hides the context card (no item open in the GE setup, or the lookup
@@ -379,10 +384,39 @@ public class RuneFlipPanel extends PluginPanel
 	void clearSelectedItem()
 	{
 		selectedCard.removeAll();
-		selectedHeader.setVisible(false);
-		selectedCard.setVisible(false);
-		fastFlipHeader.setVisible(true);
-		fastFlipCard.setVisible(true);
+		this.hasSelection = false;
+		applyVisibility();
+	}
+
+	/**
+	 * Applies the contextual-panel focus (v0.8.5). Contextual mode shows exactly
+	 * the selected-item card OR the Top 3 (header/pairing/footer always stay) and
+	 * hides the legacy dashboard + GE completed; legacy mode keeps everything.
+	 * The visibility rules live in {@link PanelVisibility} (pure, unit-tested).
+	 */
+	void setContextualMode(boolean contextual)
+	{
+		this.contextualMode = contextual;
+		applyVisibility();
+	}
+
+	private void applyVisibility()
+	{
+		boolean legacy = PanelVisibility.showLegacyDashboard(contextualMode);
+		boolean completed = PanelVisibility.showGeCompleted(contextualMode);
+		boolean selected =
+			PanelVisibility.showSelectedItem(contextualMode, hasSelection);
+		boolean topThree =
+			PanelVisibility.showTopThree(contextualMode, hasSelection);
+
+		topCard.setVisible(legacy);
+		listPanel.setVisible(legacy);
+		completedHeader.setVisible(completed);
+		completedPanel.setVisible(completed);
+		selectedHeader.setVisible(selected);
+		selectedCard.setVisible(selected);
+		fastFlipHeader.setVisible(topThree);
+		fastFlipCard.setVisible(topThree);
 		revalidateAll();
 	}
 
@@ -428,30 +462,30 @@ public class RuneFlipPanel extends PluginPanel
 			selectedCard.add(Box.createVerticalStrut(6));
 			selectedCard.add(openWikiRow(res.itemId));
 			selectedCard.add(Box.createVerticalStrut(4));
-			selectedCard.add(selectedDisclaimerLabel(res.disclaimer));
+			selectedCard.add(shortDisclaimerLabel());
 			return;
 		}
 
-		// Wiki (instant) vs RuneFlip target prices, then the manual comparison.
+		// Compact groups: Wiki legs, RuneFlip targets, safe/quick, edge messages.
 		RuneFlipData.TargetComparison tc = res.targetComparison;
-		addSelectedLine(wikiTargetPricesLine(tc));
+		addSelectedLine(wikiLegsLine(tc));
+		addSelectedLine(runeFlipTargetsLine(tc));
 		addSelectedLine(safeQuickLine(res.priceEdge));
 		addSelectedLine(contextComparisonBuyLine(tc));
 		addSelectedLine(contextComparisonSellLine(tc));
 		addSelectedLine(contextExtraProfitLine(tc));
 
-		// Backed figures grid: ROI / profit / qty / duration / cost.
+		// Plan grid: Qty / Cost / Profit / ROI / Time.
 		selectedCard.add(Box.createVerticalStrut(4));
 		JPanel grid = new JPanel(new GridLayout(0, 2, 6, 2));
 		grid.setOpaque(false);
 		grid.setAlignmentX(LEFT_ALIGNMENT);
-		grid.add(stat("ROI", pctOrDash(res.roi), Color.WHITE));
-		grid.add(stat("Profit", profitPerItemLabel(res.expectedProfit), PROFIT));
 		grid.add(stat("Qty", res.suggestedQuantity == null
 			? "—" : QuantityFormatter.formatNumber(res.suggestedQuantity), Color.WHITE));
-		grid.add(stat("~Time", durationLabel(res.expectedDurationMinutes), Color.WHITE));
 		grid.add(stat("Cost", gpOrDash(res.cost), GOLD));
-		grid.add(stat("Sell fill", speedLabel(res.sellSpeed), Color.WHITE));
+		grid.add(stat("Profit", profitPerItemLabel(res.expectedProfit), PROFIT));
+		grid.add(stat("ROI", pctOrDash(res.roi), Color.WHITE));
+		grid.add(stat("~Time", durationLabel(res.expectedDurationMinutes), Color.WHITE));
 		selectedCard.add(grid);
 		selectedCard.add(Box.createVerticalStrut(6));
 
@@ -474,12 +508,12 @@ public class RuneFlipPanel extends PluginPanel
 			selectedCard.add(setupNote);
 		}
 
-		// Manual-decision guidance (backend copy) + Open Wiki + disclaimer.
-		addSelectedLine(contextGuidanceLine(tc));
+		// Open Wiki + short disclaimer. The long backend copy is dropped here to
+		// keep the contextual card compact — "Review manually." says it all.
 		selectedCard.add(Box.createVerticalStrut(4));
 		selectedCard.add(openWikiRow(res.itemId));
 		selectedCard.add(Box.createVerticalStrut(4));
-		selectedCard.add(selectedDisclaimerLabel(res.disclaimer));
+		selectedCard.add(shortDisclaimerLabel());
 	}
 
 	/** Adds one small display-only line to the selected card when non-null. */
@@ -505,12 +539,11 @@ public class RuneFlipPanel extends PluginPanel
 		return row;
 	}
 
-	private JLabel selectedDisclaimerLabel(String backendDisclaimer)
+	/** Short footer for the contextual cards (v0.8.5): the compliance rule in
+	 *  three words. The full backend disclaimer stays on web/mobile. */
+	private JLabel shortDisclaimerLabel()
 	{
-		String note = backendDisclaimer != null && !backendDisclaimer.trim().isEmpty()
-			? backendDisclaimer.trim()
-			: FAST_FLIP_DISCLAIMER;
-		JLabel label = new JLabel(html(safe(note)));
+		JLabel label = new JLabel(html(safe(SHORT_DISCLAIMER)));
 		label.setFont(FontManager.getRunescapeSmallFont());
 		label.setForeground(MUTED);
 		label.setAlignmentX(LEFT_ALIGNMENT);
@@ -602,7 +635,7 @@ public class RuneFlipPanel extends PluginPanel
 				fastFlipCard.add(Box.createVerticalStrut(6));
 			}
 			RuneFlipData.FastFlipItem flip = flips.get(i);
-			fastFlipCard.add(fastFlipEntry(flip, assistedSetup));
+			fastFlipCard.add(fastFlipEntry(flip, i + 1, assistedSetup));
 			anyAssistedShown =
 				anyAssistedShown || showAssistedSetup(flip.action, assistedSetup);
 		}
@@ -621,28 +654,24 @@ public class RuneFlipPanel extends PluginPanel
 			fastFlipCard.add(Box.createVerticalStrut(4));
 		}
 
-		String note = response.disclaimer != null && !response.disclaimer.trim().isEmpty()
-			? response.disclaimer.trim()
-			: FAST_FLIP_DISCLAIMER;
-		// When targets are shown, the price-edge disclaimer rides along —
-		// verbatim from the backend when it sent one.
-		String edgeNote = priceEdgeDisclaimer(flips, shown);
-		if (edgeNote != null)
-		{
-			note = note + " " + edgeNote;
-		}
-		JLabel fastFlipDisclaimer = new JLabel(html(safe(note)));
+		// Short footer (v0.8.5) — the full backend disclaimer stays on the
+		// dedicated web/mobile screens; here the compact rule is enough.
+		JLabel fastFlipDisclaimer = new JLabel(html(safe(SHORT_DISCLAIMER)));
 		fastFlipDisclaimer.setFont(FontManager.getRunescapeSmallFont());
 		fastFlipDisclaimer.setForeground(MUTED);
 		fastFlipCard.add(fastFlipDisclaimer);
 		revalidateAll();
 	}
 
-	/** One compact fast-flip entry: display-only lines, plus (opt-in) the
-	 *  clipboard-only Assisted Offer Setup buttons when the action has a
-	 *  concrete target price. */
+	/**
+	 * One compact Top-3 row (v0.8.5): rank + icon + name · risk, then
+	 * Buy → Sell · expected profit · ROI, then the recommended action; plus the
+	 * opt-in clipboard-only Copy buttons when the action carries a target price.
+	 * Display only — figures come verbatim from the backend.
+	 */
 	private JPanel fastFlipEntry(
 		RuneFlipData.FastFlipItem flip,
+		int rank,
 		boolean assistedSetup)
 	{
 		JPanel entry = new JPanel();
@@ -650,36 +679,41 @@ public class RuneFlipPanel extends PluginPanel
 		entry.setOpaque(false);
 		entry.setAlignmentX(LEFT_ALIGNMENT);
 
+		// Row 1: #rank + icon + name · risk.
+		JPanel head = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+		head.setOpaque(false);
+		head.setAlignmentX(LEFT_ALIGNMENT);
+		JLabel rankLabel = new JLabel("#" + rank);
+		rankLabel.setFont(FontManager.getRunescapeSmallFont());
+		rankLabel.setForeground(MUTED);
+		head.add(rankLabel);
+		if (flip.itemId > 0)
+		{
+			JLabel icon = new JLabel();
+			AsyncBufferedImage img = itemManager.getImage(flip.itemId);
+			if (img != null)
+			{
+				img.addTo(icon);
+			}
+			head.add(icon);
+		}
 		String risk = flip.riskLevel == null ? "UNKNOWN" : flip.riskLevel;
 		JLabel name = new JLabel(html(
 			"<b>" + safe(sanitizeName(flip.itemName)) + "</b>"
-				+ " <span style='color:" + riskColorHex(risk) + "'>· "
-				+ risk + " risk</span>"
-				+ (flip.confidence != null
-					? " <span style='color:#878d9c'>· conf " + flip.confidence + "</span>"
-					: "")));
+				+ " <span style='color:" + riskColorHex(risk) + "'>· " + risk
+				+ "</span>"));
 		name.setFont(FontManager.getRunescapeSmallFont());
 		name.setForeground(Color.WHITE);
-		entry.add(name);
+		head.add(name);
+		entry.add(head);
 
-		JLabel prices = new JLabel(html(
-			"<span style='color:#878d9c'>Buy</span> " + gpOrDash(flip.suggestedBuyPrice)
-				+ " <span style='color:#878d9c'>→ Sell</span> "
-				+ gpOrDash(flip.suggestedSellPrice)
-				+ " <span style='color:#4cba86'>· "
-				+ profitPerItemLabel(flip.profitPerItem) + "/item</span>"));
-		prices.setFont(FontManager.getRunescapeSmallFont());
-		prices.setForeground(Color.WHITE);
-		entry.add(prices);
+		// Row 2: Buy → Sell · expected profit · ROI (all backend figures).
+		JLabel stats = new JLabel(html(topFlipStatsLine(flip)));
+		stats.setFont(FontManager.getRunescapeSmallFont());
+		stats.setForeground(Color.WHITE);
+		entry.add(stats);
 
-		JLabel speeds = new JLabel(html(
-			"<span style='color:#878d9c'>Buy: " + speedLabel(flip.buySpeed)
-				+ " · Sell: " + speedLabel(flip.sellSpeed) + "</span>"));
-		speeds.setFont(FontManager.getRunescapeSmallFont());
-		entry.add(speeds);
-
-		// Recommended action (v0.8.2): one display-only "Action: <label> —
-		// <reason>" line. reviewOnly by contract — never a game interaction.
+		// Row 3: recommended action (v0.8.2), verbatim + display-only.
 		String actionLine = actionLine(flip.action);
 		if (actionLine != null)
 		{
@@ -692,23 +726,6 @@ public class RuneFlipPanel extends PluginPanel
 		if (showAssistedSetup(flip.action, assistedSetup))
 		{
 			entry.add(assistedSetupRow(flip.action));
-		}
-
-		// Price Edge targets (v0.7.1): two extra display-only lines with the
-		// backend's wiki-vs-target prices. Nothing here computes or acts.
-		String targetLine = priceEdgeTargetLine(flip.priceEdge);
-		if (targetLine != null)
-		{
-			JLabel target = new JLabel(html(targetLine));
-			target.setFont(FontManager.getRunescapeSmallFont());
-			entry.add(target);
-			String profitLine = priceEdgeProfitLine(flip.priceEdge);
-			if (profitLine != null)
-			{
-				JLabel profit = new JLabel(html(profitLine));
-				profit.setFont(FontManager.getRunescapeSmallFont());
-				entry.add(profit);
-			}
 		}
 
 		return entry;
@@ -928,21 +945,32 @@ public class RuneFlipPanel extends PluginPanel
 	}
 
 	/**
-	 * "Wiki (instant): buy 130 · sell 119 → target buy 122 · sell 129" — the
-	 * wiki instant legs next to the RuneFlip recommended targets, all backend
-	 * figures. Null when the comparison block is absent (pre-0.8.4 backend).
+	 * "Wiki: L 99 · H 109" — the two raw legs, compact (v0.8.5). Low = recent
+	 * insta-sell (the buy anchor), High = recent insta-buy (the sell anchor).
+	 * Null when the comparison block is absent (pre-0.8.4 backend).
 	 */
-	static String wikiTargetPricesLine(RuneFlipData.TargetComparison tc)
+	static String wikiLegsLine(RuneFlipData.TargetComparison tc)
 	{
-		if (tc == null)
+		if (tc == null || (tc.wikiLow == null && tc.wikiHigh == null))
 		{
 			return null;
 		}
-		return "<span style='color:#878d9c'>Wiki:</span> buy "
-			+ gpOrDash(tc.wikiBuyPrice) + " · sell " + gpOrDash(tc.wikiSellPrice)
-			+ " <span style='color:#9fb6ef'>→ target buy "
-			+ gpOrDash(tc.recommendedBuyPrice) + " · sell "
-			+ gpOrDash(tc.recommendedSellPrice) + "</span>";
+		return "<span style='color:#878d9c'>Wiki:</span> L "
+			+ gpOrDash(tc.wikiLow) + " · H " + gpOrDash(tc.wikiHigh);
+	}
+
+	/**
+	 * "RuneFlip: buy 100 · sell 108" — the recommended targets, compact
+	 * (v0.8.5). Null when the backend stands behind no target pair.
+	 */
+	static String runeFlipTargetsLine(RuneFlipData.TargetComparison tc)
+	{
+		if (tc == null || (tc.targetBuy == null && tc.targetSell == null))
+		{
+			return null;
+		}
+		return "<span style='color:#9fb6ef'>RuneFlip:</span> buy "
+			+ gpOrDash(tc.targetBuy) + " · sell " + gpOrDash(tc.targetSell);
 	}
 
 	/**
@@ -961,8 +989,25 @@ public class RuneFlipPanel extends PluginPanel
 			+ gpOrDash(edge.quickBuyPrice) + "/" + gpOrDash(edge.quickSellPrice);
 	}
 
+	/**
+	 * Top-3 stats line (v0.8.5): "Buy 100 → Sell 108 · +600 gp · ROI 6.0%" — the
+	 * suggested legs, the whole-flip expected profit and ROI, all backend
+	 * figures rendered verbatim.
+	 */
+	static String topFlipStatsLine(RuneFlipData.FastFlipItem flip)
+	{
+		return "<span style='color:#878d9c'>Buy</span> "
+			+ gpOrDash(flip.suggestedBuyPrice)
+			+ " <span style='color:#878d9c'>→ Sell</span> "
+			+ gpOrDash(flip.suggestedSellPrice)
+			+ " <span style='color:#4cba86'>· "
+			+ profitPerItemLabel(flip.estimatedProfit) + "</span>"
+			+ " <span style='color:#878d9c'>· ROI " + pctOrDash(flip.roi)
+			+ "</span>";
+	}
+
 	/** Buy-side manual-decision line — the backend's buyMessage verbatim (e.g.
-	 *  "Try buying 8 gp cheaper than Wiki"). Null when absent. */
+	 *  "Try buying 8 gp below Wiki low"). Null when absent. */
 	static String contextComparisonBuyLine(RuneFlipData.TargetComparison tc)
 	{
 		if (tc == null || tc.buyMessage == null || tc.buyMessage.trim().isEmpty())
@@ -985,9 +1030,9 @@ public class RuneFlipPanel extends PluginPanel
 	}
 
 	/**
-	 * "Edge vs Wiki: +18 gp/item · +18,000 for qty" — the total per-item
-	 * advantage of the RuneFlip targets over the wiki instant prices, and the
-	 * qty-scaled figure when present. Null when the backend computed no edge.
+	 * "Edge: +6 gp/item · +600 for qty" — the recommended flip's profit per item
+	 * after tax and the qty-scaled figure (v0.8.5). Null when the backend
+	 * computed no edge.
 	 */
 	static String contextExtraProfitLine(RuneFlipData.TargetComparison tc)
 	{
@@ -995,7 +1040,7 @@ public class RuneFlipPanel extends PluginPanel
 		{
 			return null;
 		}
-		String line = "<span style='color:#4cba86'>Edge vs Wiki:</span> "
+		String line = "<span style='color:#4cba86'>Edge:</span> "
 			+ profitPerItemLabel(tc.extraEdgePerItem) + "/item";
 		if (tc.potentialExtraProfit != null)
 		{

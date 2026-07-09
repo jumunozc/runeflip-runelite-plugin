@@ -114,6 +114,33 @@ public class RuneFlipPanelTextTest
 	}
 
 	@Test
+	public void topFlipStatsLineShowsLegsExpectedProfitAndRoi()
+	{
+		RuneFlipData.FastFlipItem flip = new RuneFlipData.FastFlipItem();
+		flip.suggestedBuyPrice = 100L;
+		flip.suggestedSellPrice = 108L;
+		flip.estimatedProfit = 600L;
+		flip.roi = 0.06;
+
+		String line = RuneFlipPanel.topFlipStatsLine(flip);
+		assertTrue(line.contains("Buy"));
+		assertTrue(line.contains("100 gp"));
+		assertTrue(line.contains("Sell"));
+		assertTrue(line.contains("108 gp"));
+		// Whole-flip expected profit (not per-item) and ROI (locale-agnostic:
+		// the decimal separator depends on the JVM default locale).
+		assertTrue(line.contains("+600 gp"));
+		assertTrue(line.contains("ROI 6"));
+		assertTrue(line.contains("%"));
+	}
+
+	@Test
+	public void shortDisclaimerIsTheCompactComplianceRule()
+	{
+		assertEquals("Review manually.", RuneFlipPanel.SHORT_DISCLAIMER);
+	}
+
+	@Test
 	public void strategySummaryRendersTheBackendDescriptionVerbatim()
 	{
 		RuneFlipData.FastFlipStrategy strategy = new RuneFlipData.FastFlipStrategy();

@@ -33,19 +33,21 @@ or session data; never receives commands from the backend.
   clipboard. "Buy/Sell" appear strictly as data labels — there are no trade
   actions, no overlays, and nothing that clicks, types or guides input in
   the game client.
-- **Context-aware GE panel (v0.8.4, display-only).** When you open an item in
-  the Grand Exchange Buy/Sell setup, the panel swaps its **Top 3 Fast Flips**
-  for *that item's* RuneFlip context: wiki buy/sell, safe/quick/recommended
-  targets, the recommended action, and ROI/profit/qty/duration/risk. It also
-  shows a **Wiki vs RuneFlip targets** comparison — "Try buying X gp cheaper
-  than Wiki" / "Try selling X gp higher than Wiki" — leaving the decision to
-  you (*"Use lower buy for margin, higher sell if you can wait. Review
-  manually."*). With no item open, it shows the **Top 3** as before. Which item
-  is open is learned by a **read-only** poll of the current-GE-item VarPlayer —
-  no OCR, no screen scraping, no input. Items with no RuneFlip target show "No
-  RuneFlip target yet" + Open Wiki. Requires a RuneFlip backend on **v0.8.4+**
-  (`GET /fast-flip/item/:itemId`); against an older backend the panel simply
-  keeps showing the Top 3.
+- **Context-aware GE panel (v0.8.4, focused in v0.8.5, display-only).** When you
+  open an item in the Grand Exchange Buy/Sell setup, the panel shows *that
+  item's* RuneFlip context: Wiki **low/high** legs, safe/quick/recommended
+  targets, a **Wiki vs RuneFlip targets** comparison (buy anchored to the wiki
+  low leg, sell to the wiki high leg — e.g. *"Target is 3 gp above Wiki low for
+  faster fill"*), the recommended action, and a compact Qty / Cost / Profit /
+  ROI / Time plan. With no item open, it shows the **Top 3 Fast Flips** (rank,
+  item, buy→sell, expected profit, ROI, risk, action). The panel is **focused**:
+  it shows one view at a time and hides the legacy recommendation dashboard and
+  the GE-completed summary (turn the *Context-aware GE panel* setting off to keep
+  the full legacy panel). Which item is open is learned by a **read-only** poll
+  of the current-GE-item VarPlayer — no OCR, no screen scraping, no input. Items
+  with no RuneFlip target show "No RuneFlip target yet" + Open Wiki. Requires a
+  RuneFlip backend on **v0.8.4+** (`GET /fast-flip/item/:itemId`); against an
+  older backend the panel keeps showing the Top 3.
 - **Capital sync (opt-in, OFF by default).** Optionally also reports
   inventory coins — and bank coins as *last seen* when **you** open the
   bank. Observation only; nothing is ever acted on.
@@ -63,7 +65,7 @@ Open RuneLite → Configuration → **RuneFlip Companion**:
 | Keepalive (minutes) | Re-send an unchanged snapshot after this long. | 5 (min 1) |
 | Capital sync (observation) | Opt-in coins reporting described above. | **off** |
 | Sidebar panel | Show the informational panel. | on |
-| Context-aware GE panel | When you open an item in the GE setup, show that item's RuneFlip context (wiki vs targets, action, ROI) instead of the Top 3. Reads only the selected item id — never OCR, screen scraping or input. | on |
+| Context-aware GE panel | When you open an item in the GE setup, show a focused view: that item's RuneFlip context (wiki vs targets, action, ROI) or, with none open, the Top 3 — hiding the legacy dashboard and GE completed. Reads only the selected item id — never OCR, screen scraping or input. Off = full legacy panel. | on |
 | Panel refresh (seconds) | Panel re-fetch cadence while open. | 60 (min 30) |
 
 The plugin also generates a random anonymous client id (a UUID) the first
@@ -148,7 +150,7 @@ yourself**:
 
 1. Build the jar (see **Build** above): `./gradlew clean test build` produces
    `build/libs/runeflip-companion-<version>.jar` (currently
-   `runeflip-companion-0.8.4.jar`).
+   `runeflip-companion-0.8.5.jar`).
 2. Copy that jar into RuneLite's sideloaded-plugins folder:
    - Windows: `%USERPROFILE%\.runelite\sideloaded-plugins\`
    - macOS / Linux: `~/.runelite/sideloaded-plugins/`
@@ -160,13 +162,15 @@ install only a jar you built (or trust). The default **Backend URL**
 (`https://runeflip-api.onrender.com/api`) points at the public RuneFlip
 service; point it at your own backend if you self-host.
 
-> **v0.8.4** (2026-07): adds the context-aware GE panel (item-aware, read-only)
-> and the Wiki vs RuneFlip targets comparison. `gradlew clean test build` green
-> (incl. `ComplianceScanTest`), jar emitted. The contextual panel needs a
-> RuneFlip backend on v0.8.4+ (`/fast-flip/item/:itemId`); until the public
-> backend is updated it degrades gracefully to the Top 3. Previously
-> smoke-tested against production for v0.8.3 (`strategy` echo,
-> recommended-`action`, `/pairing`, `/strategy/preferences`,
+> **v0.8.5** (2026-07): corrects the Wiki vs RuneFlip comparison (buy anchored to
+> the wiki low leg, sell to the high leg) and **focuses** the contextual panel —
+> it shows only the selected-item card or the Top 3 and hides the legacy
+> dashboard + GE completed; the selected card and Top-3 rows were compacted.
+> `gradlew clean test build` green (74 tests, incl. `ComplianceScanTest`), jar
+> emitted. The contextual panel needs a RuneFlip backend on v0.8.4+
+> (`/fast-flip/item/:itemId`); until the public backend is updated it degrades
+> gracefully to the Top 3. Previously smoke-tested against production for v0.8.3
+> (`strategy` echo, recommended-`action`, `/pairing`, `/strategy/preferences`,
 > `/ge-slots/snapshot` verified live). Assisted Offer Setup stays **OFF by
 > default** and clipboard-only. See `docs/runelite-readonly-contract.md` in the
 > monorepo for the full contract.

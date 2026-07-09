@@ -496,6 +496,12 @@ public class RuneFlipCompanionPlugin extends Plugin
 		String url = config.backendUrl();
 		String clientId = ensureClientId();
 
+		// Focus the panel (v0.8.5): contextual mode shows only the selected-item
+		// card or the Top 3, hiding the legacy dashboard + GE completed. Applied
+		// each refresh so a config toggle takes effect without a restart.
+		final boolean contextual = config.contextualGePanel();
+		SwingUtilities.invokeLater(() -> target.setContextualMode(contextual));
+
 		apiClient.fetchRecommendations(url, 10,
 			response -> SwingUtilities.invokeLater(() ->
 			{
