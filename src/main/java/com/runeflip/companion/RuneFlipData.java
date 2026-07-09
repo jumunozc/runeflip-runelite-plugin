@@ -247,6 +247,66 @@ public final class RuneFlipData
 		public String disclaimer;
 	}
 
+	/**
+	 * Response of GET /fast-flip/item/:itemId (v0.8.4) — the full RuneFlip
+	 * context for ONE item, used by the contextual side panel when the user has
+	 * an item open in the GE Buy/Sell setup. Display data only: every figure and
+	 * every comparison string is computed by the backend and rendered verbatim —
+	 * the plugin never derives or acts on any of it. `recommended` is false (with
+	 * a clear `notRecommendedReason`) for AVOID / not-recommended / no-data items;
+	 * the panel then shows "No RuneFlip target yet".
+	 */
+	public static class FastFlipItemContextResponse
+	{
+		public String generatedAt;
+		public int itemId;
+		public String itemName;
+		public String iconUrl;
+		public String priceCapturedAt;
+		public Boolean recommended;
+		public String notRecommendedReason;
+		public PriceEdge priceEdge;
+		public RecommendedAction action;
+		public TargetComparison targetComparison;
+		public Long expectedProfit;
+		public Double expectedDurationMinutes;
+		public Double roi;
+		public Long cost;
+		public Long suggestedQuantity;
+		/** "LOW" | "MEDIUM" | "HIGH" | "AVOID". */
+		public String riskLevel;
+		public Integer confidence;
+		public String buySpeed;
+		public String sellSpeed;
+		/** Applied strategy echo (v0.8.0); null on pre-0.8.0 backends. */
+		public FastFlipStrategy strategy;
+		public String disclaimer;
+	}
+
+	/**
+	 * Wiki-vs-RuneFlip target comparison (v0.8.4). Backend arithmetic over the
+	 * Price Edge block: "Wiki buy" is the instant-buy leg (buying now), "Wiki
+	 * sell" is the instant-sell leg (selling now); a positive buyDelta means the
+	 * RuneFlip buy target is that many gp cheaper, a positive sellDelta means the
+	 * sell target is that many gp higher. The plugin renders the ready-made
+	 * buyMessage / sellMessage / guidance strings verbatim — it never computes a
+	 * comparison itself and never acts on it.
+	 */
+	public static class TargetComparison
+	{
+		public Long wikiBuyPrice;
+		public Long wikiSellPrice;
+		public Long recommendedBuyPrice;
+		public Long recommendedSellPrice;
+		public Long buyDelta;
+		public Long sellDelta;
+		public Long extraEdgePerItem;
+		public Long potentialExtraProfit;
+		public String buyMessage;
+		public String sellMessage;
+		public String guidance;
+	}
+
 	/** Body of POST /pairing/complete — just the user-pasted code. */
 	public static class PairingRequest
 	{

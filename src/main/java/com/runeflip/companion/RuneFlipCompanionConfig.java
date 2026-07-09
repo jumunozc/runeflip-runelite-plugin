@@ -115,6 +115,24 @@ public interface RuneFlipCompanionConfig extends Config
 		return false;
 	}
 
+	/**
+	 * Context-aware GE panel (v0.8.4), ON by default. When enabled and an item
+	 * is open in the GE Buy/Sell setup, the sidebar swaps its Top-3 list for that
+	 * item's RuneFlip context (wiki vs target comparison, action, ROI/profit/qty).
+	 * It reads ONLY the read-only "current GE item" VarPlayer to know which item
+	 * is selected — no OCR, no screen scraping, no input. Display-only.
+	 */
+	@ConfigItem(
+		keyName = "contextualGePanel",
+		name = "Context-aware GE panel",
+		description = "When you open an item in the GE Buy/Sell setup, show that item's RuneFlip context (wiki vs target, action, ROI) instead of the Top 3 list. Reads only the selected item id — never OCR, screen scraping or input. Display-only.",
+		position = 12
+	)
+	default boolean contextualGePanel()
+	{
+		return true;
+	}
+
 	@Range(min = 30)
 	@ConfigItem(
 		keyName = "panelRefreshSeconds",

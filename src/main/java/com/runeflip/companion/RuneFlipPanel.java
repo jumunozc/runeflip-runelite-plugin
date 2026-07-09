@@ -48,6 +48,10 @@ public class RuneFlipPanel extends PluginPanel
 
 	private final JLabel statusLabel = new JLabel("Offline");
 	private final JLabel capitalLabel = new JLabel(" ");
+	/** Context-aware GE item card (v0.8.4) — shown only while an item is open
+	 *  in the GE Buy/Sell setup; hidden (zero space) otherwise. */
+	private final JLabel selectedHeader = new JLabel("Selected GE item");
+	private final JPanel selectedCard = new JPanel();
 	private final JPanel topCard = new JPanel();
 	private final JPanel listPanel = new JPanel();
 	private final JLabel fastFlipHeader = new JLabel("Fast flip · 0");
@@ -140,6 +144,20 @@ public class RuneFlipPanel extends PluginPanel
 		JPanel capitalRow = wrap(capitalLabel);
 		add(capitalRow);
 		add(Box.createVerticalStrut(8));
+
+		// ── Context-aware GE item (v0.8.4 — display only) ───────────────────
+		selectedHeader.setFont(FontManager.getRunescapeSmallFont());
+		selectedHeader.setForeground(GOLD);
+		add(wrap(selectedHeader));
+		add(Box.createVerticalStrut(4));
+		selectedCard.setLayout(new BoxLayout(selectedCard, BoxLayout.Y_AXIS));
+		selectedCard.setBackground(CARD_BG);
+		selectedCard.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+		selectedCard.setAlignmentX(LEFT_ALIGNMENT);
+		add(selectedCard);
+		add(Box.createVerticalStrut(8));
+		selectedHeader.setVisible(false);
+		selectedCard.setVisible(false);
 
 		// ── Pairing (v0.6.3 — config + HTTP only, never touches the game) ──
 		JPanel pairingHeader = new JPanel(new BorderLayout());
@@ -324,6 +342,179 @@ public class RuneFlipPanel extends PluginPanel
 			? QuantityFormatter.quantityToStackSize(capital.bankCoinsLastSeen) + " bank (last seen)"
 			: "bank not seen yet");
 		capitalLabel.setText(html(sb.toString()));
+	}
+
+	// ── Context-aware GE item (v0.8.4) ───────────────────────────────────────
+
+	/**
+	 * Shows the RuneFlip context for the item the user just opened in the GE
+	 * Buy/Sell setup. Display only: every price, comparison string and figure
+	 * comes verbatim from GET /fast-flip/item/:itemId — the plugin renders them
+	 * and never acts on the game. When the backend does not stand behind a
+	 * target (AVOID / not recommended / no data) it shows "No RuneFlip target
+	 * yet" plus Open Wiki, honestly.
+	 */
+	void updateSelectedItem(
+		RuneFlipData.FastFlipItemContextResponse response,
+		boolean assistedSetup)
+	{
+		this.assistedSetupEnabled = assistedSetup;
+		selectedCard.removeAll();
+		if (response == null)
+		{
+			clearSelectedItem();
+			return;
+		}
+		buildSelectedCard(response, assistedSetup);
+		selectedHeader.setVisible(true);
+		selectedCard.setVisible(true);
+		// While an item is selected, the item context replaces the Top-3 list.
+		fastFlipHeader.setVisible(false);
+		fastFlipCard.setVisible(false);
+		revalidateAll();
+	}
+
+	/** Hides the context card (no item open in the GE setup, or the lookup
+	 *  failed) — the sidebar falls back to the Top-3 Fast Flip list. */
+	void clearSelectedItem()
+	{
+		selectedCard.removeAll();
+		selectedHeader.setVisible(false);
+		selectedCard.setVisible(false);
+		fastFlipHeader.setVisible(true);
+		fastFlipCard.setVisible(true);
+		revalidateAll();
+	}
+
+	private void buildSelectedCard(
+		RuneFlipData.FastFlipItemContextResponse res,
+		boolean assistedSetup)
+	{
+		// Header: icon + sanitized name + risk + confidence (all backend data).
+		JPanel head = new JPanel(new BorderLayout(6, 0));
+		head.setOpaque(false);
+		head.setAlignmentX(LEFT_ALIGNMENT);
+		if (res.itemId > 0)
+		{
+			JLabel icon = new JLabel();
+			AsyncBufferedImage img = itemManager.getImage(res.itemId);
+			if (img != null)
+			{
+				img.addTo(icon);
+			}
+			head.add(icon, BorderLayout.WEST);
+		}
+		String risk = res.riskLevel == null ? "UNKNOWN" : res.riskLevel;
+		JLabel name = new JLabel(html(
+			"<b>" + safe(sanitizeName(res.itemName)) + "</b>"
+				+ " <span style='color:" + riskColorHex(risk) + "'>· " + risk
+				+ " risk</span>"
+				+ (res.confidence != null
+					? " <span style='color:#878d9c'>· conf " + res.confidence + "</span>"
+					: "")));
+		name.setFont(FontManager.getRunescapeSmallFont());
+		name.setForeground(Color.WHITE);
+		head.add(name, BorderLayout.CENTER);
+		selectedCard.add(head);
+		selectedCard.add(Box.createVerticalStrut(6));
+
+		// Not recommended (AVOID / not recommended / no data): say so honestly.
+		String noTarget = noRuneFlipTargetLine(res);
+		if (noTarget != null)
+		{
+			JLabel none = new JLabel(html(noTarget));
+			none.setFont(FontManager.getRunescapeSmallFont());
+			selectedCard.add(none);
+			selectedCard.add(Box.createVerticalStrut(6));
+			selectedCard.add(openWikiRow(res.itemId));
+			selectedCard.add(Box.createVerticalStrut(4));
+			selectedCard.add(selectedDisclaimerLabel(res.disclaimer));
+			return;
+		}
+
+		// Wiki (instant) vs RuneFlip target prices, then the manual comparison.
+		RuneFlipData.TargetComparison tc = res.targetComparison;
+		addSelectedLine(wikiTargetPricesLine(tc));
+		addSelectedLine(safeQuickLine(res.priceEdge));
+		addSelectedLine(contextComparisonBuyLine(tc));
+		addSelectedLine(contextComparisonSellLine(tc));
+		addSelectedLine(contextExtraProfitLine(tc));
+
+		// Backed figures grid: ROI / profit / qty / duration / cost.
+		selectedCard.add(Box.createVerticalStrut(4));
+		JPanel grid = new JPanel(new GridLayout(0, 2, 6, 2));
+		grid.setOpaque(false);
+		grid.setAlignmentX(LEFT_ALIGNMENT);
+		grid.add(stat("ROI", pctOrDash(res.roi), Color.WHITE));
+		grid.add(stat("Profit", profitPerItemLabel(res.expectedProfit), PROFIT));
+		grid.add(stat("Qty", res.suggestedQuantity == null
+			? "—" : QuantityFormatter.formatNumber(res.suggestedQuantity), Color.WHITE));
+		grid.add(stat("~Time", durationLabel(res.expectedDurationMinutes), Color.WHITE));
+		grid.add(stat("Cost", gpOrDash(res.cost), GOLD));
+		grid.add(stat("Sell fill", speedLabel(res.sellSpeed), Color.WHITE));
+		selectedCard.add(grid);
+		selectedCard.add(Box.createVerticalStrut(6));
+
+		// Recommended action (v0.8.2), verbatim + display-only.
+		String actionLine = actionLine(res.action);
+		if (actionLine != null)
+		{
+			JLabel action = new JLabel(html(actionLine));
+			action.setFont(FontManager.getRunescapeSmallFont());
+			selectedCard.add(action);
+		}
+
+		// Assisted Offer Setup (v0.8.3, opt-in): clipboard-only Copy buttons.
+		if (showAssistedSetup(res.action, assistedSetup))
+		{
+			selectedCard.add(assistedSetupRow(res.action));
+			JLabel setupNote = new JLabel(html(safe(ASSISTED_SETUP_NOTE)));
+			setupNote.setFont(FontManager.getRunescapeSmallFont());
+			setupNote.setForeground(GOLD);
+			selectedCard.add(setupNote);
+		}
+
+		// Manual-decision guidance (backend copy) + Open Wiki + disclaimer.
+		addSelectedLine(contextGuidanceLine(tc));
+		selectedCard.add(Box.createVerticalStrut(4));
+		selectedCard.add(openWikiRow(res.itemId));
+		selectedCard.add(Box.createVerticalStrut(4));
+		selectedCard.add(selectedDisclaimerLabel(res.disclaimer));
+	}
+
+	/** Adds one small display-only line to the selected card when non-null. */
+	private void addSelectedLine(String htmlInner)
+	{
+		if (htmlInner == null)
+		{
+			return;
+		}
+		JLabel label = new JLabel(html(htmlInner));
+		label.setFont(FontManager.getRunescapeSmallFont());
+		label.setAlignmentX(LEFT_ALIGNMENT);
+		selectedCard.add(label);
+	}
+
+	private JPanel openWikiRow(int itemId)
+	{
+		JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 2));
+		row.setOpaque(false);
+		row.setAlignmentX(LEFT_ALIGNMENT);
+		row.add(actionButton("Open Wiki", () -> LinkBrowser.browse(
+			"https://prices.runescape.wiki/osrs/item/" + itemId)));
+		return row;
+	}
+
+	private JLabel selectedDisclaimerLabel(String backendDisclaimer)
+	{
+		String note = backendDisclaimer != null && !backendDisclaimer.trim().isEmpty()
+			? backendDisclaimer.trim()
+			: FAST_FLIP_DISCLAIMER;
+		JLabel label = new JLabel(html(safe(note)));
+		label.setFont(FontManager.getRunescapeSmallFont());
+		label.setForeground(MUTED);
+		label.setAlignmentX(LEFT_ALIGNMENT);
+		return label;
 	}
 
 	void updateRecommendations(RuneFlipData.RecommendationsResponse response)
@@ -714,6 +905,117 @@ public class RuneFlipPanel extends PluginPanel
 				: "");
 	}
 
+	// ── Context-aware GE item text (v0.8.4 — verbatim from the backend) ──────
+
+	/**
+	 * "No RuneFlip target yet" line for a selected item the model does not stand
+	 * behind (AVOID / not recommended / no data). Null when the backend DID
+	 * recommend a target (then the full comparison renders instead). The reason
+	 * is the backend's own, rendered verbatim.
+	 */
+	static String noRuneFlipTargetLine(RuneFlipData.FastFlipItemContextResponse res)
+	{
+		if (res == null || Boolean.TRUE.equals(res.recommended))
+		{
+			return null;
+		}
+		String reason = res.notRecommendedReason != null
+			&& !res.notRecommendedReason.trim().isEmpty()
+			? res.notRecommendedReason.trim()
+			: "This item has no recent price or feature data.";
+		return "<span style='color:#e26a5e'>No RuneFlip target yet</span>"
+			+ " <span style='color:#878d9c'>— " + safe(reason) + "</span>";
+	}
+
+	/**
+	 * "Wiki (instant): buy 130 · sell 119 → target buy 122 · sell 129" — the
+	 * wiki instant legs next to the RuneFlip recommended targets, all backend
+	 * figures. Null when the comparison block is absent (pre-0.8.4 backend).
+	 */
+	static String wikiTargetPricesLine(RuneFlipData.TargetComparison tc)
+	{
+		if (tc == null)
+		{
+			return null;
+		}
+		return "<span style='color:#878d9c'>Wiki:</span> buy "
+			+ gpOrDash(tc.wikiBuyPrice) + " · sell " + gpOrDash(tc.wikiSellPrice)
+			+ " <span style='color:#9fb6ef'>→ target buy "
+			+ gpOrDash(tc.recommendedBuyPrice) + " · sell "
+			+ gpOrDash(tc.recommendedSellPrice) + "</span>";
+	}
+
+	/**
+	 * "Safe 119/130 · Quick 122/129" — the safe and quick target pairs (buy/sell)
+	 * from the Price Edge block. Null when no edge block or no safe pair exists.
+	 */
+	static String safeQuickLine(RuneFlipData.PriceEdge edge)
+	{
+		if (edge == null || edge.safeBuyPrice == null || edge.safeSellPrice == null)
+		{
+			return null;
+		}
+		return "<span style='color:#878d9c'>Safe</span> "
+			+ gpOrDash(edge.safeBuyPrice) + "/" + gpOrDash(edge.safeSellPrice)
+			+ " <span style='color:#878d9c'>· Quick</span> "
+			+ gpOrDash(edge.quickBuyPrice) + "/" + gpOrDash(edge.quickSellPrice);
+	}
+
+	/** Buy-side manual-decision line — the backend's buyMessage verbatim (e.g.
+	 *  "Try buying 8 gp cheaper than Wiki"). Null when absent. */
+	static String contextComparisonBuyLine(RuneFlipData.TargetComparison tc)
+	{
+		if (tc == null || tc.buyMessage == null || tc.buyMessage.trim().isEmpty())
+		{
+			return null;
+		}
+		return "<span style='color:#9fb6ef'>Buy:</span> "
+			+ "<span style='color:#e6e6e6'>" + safe(tc.buyMessage.trim()) + "</span>";
+	}
+
+	/** Sell-side manual-decision line — the backend's sellMessage verbatim. */
+	static String contextComparisonSellLine(RuneFlipData.TargetComparison tc)
+	{
+		if (tc == null || tc.sellMessage == null || tc.sellMessage.trim().isEmpty())
+		{
+			return null;
+		}
+		return "<span style='color:#4cba86'>Sell:</span> "
+			+ "<span style='color:#e6e6e6'>" + safe(tc.sellMessage.trim()) + "</span>";
+	}
+
+	/**
+	 * "Edge vs Wiki: +18 gp/item · +18,000 for qty" — the total per-item
+	 * advantage of the RuneFlip targets over the wiki instant prices, and the
+	 * qty-scaled figure when present. Null when the backend computed no edge.
+	 */
+	static String contextExtraProfitLine(RuneFlipData.TargetComparison tc)
+	{
+		if (tc == null || tc.extraEdgePerItem == null)
+		{
+			return null;
+		}
+		String line = "<span style='color:#4cba86'>Edge vs Wiki:</span> "
+			+ profitPerItemLabel(tc.extraEdgePerItem) + "/item";
+		if (tc.potentialExtraProfit != null)
+		{
+			line += " <span style='color:#878d9c'>· "
+				+ profitPerItemLabel(tc.potentialExtraProfit) + " for qty</span>";
+		}
+		return line;
+	}
+
+	/** Fixed manual-decision guidance (backend copy), rendered verbatim. Null
+	 *  when the backend sent none. */
+	static String contextGuidanceLine(RuneFlipData.TargetComparison tc)
+	{
+		if (tc == null || tc.guidance == null || tc.guidance.trim().isEmpty())
+		{
+			return null;
+		}
+		return "<span style='color:#878d9c'>" + safe(tc.guidance.trim()) + "</span>";
+	}
+
 	/**
 	 * Compact read-only summary of completed offers. Pure display: nothing
 	 * here (or anywhere) can search, load, click, type or act on the game —
@@ -987,6 +1289,30 @@ public class RuneFlipPanel extends PluginPanel
 	static String gpOrDash(Long value)
 	{
 		return value == null ? "—" : gp(value);
+	}
+
+	/** Nullable backend ratio → percent text; "—" when the backend sent null. */
+	static String pctOrDash(Double ratio)
+	{
+		return ratio == null ? "—" : pct(ratio);
+	}
+
+	/**
+	 * Whole-flip duration (minutes, backend figure) → short label: "~14m",
+	 * "~2h 05m"; "—" when the backend sent null. Presentation only.
+	 */
+	static String durationLabel(Double minutes)
+	{
+		if (minutes == null)
+		{
+			return "—";
+		}
+		long total = Math.round(minutes);
+		if (total < 60)
+		{
+			return "~" + total + "m";
+		}
+		return "~" + (total / 60) + "h " + String.format("%02dm", total % 60);
 	}
 
 	/** Backend profit/item verbatim, "+" prefixed when positive; "—" if null. */

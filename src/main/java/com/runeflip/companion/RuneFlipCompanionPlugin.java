@@ -19,6 +19,7 @@ import net.runelite.api.ItemContainer;
 import net.runelite.api.ItemID;
 import net.runelite.api.events.GrandExchangeOfferChanged;
 import net.runelite.api.events.ItemContainerChanged;
+import net.runelite.api.events.VarbitChanged;
 import java.awt.image.BufferedImage;
 import javax.swing.SwingUtilities;
 import net.runelite.client.callback.ClientThread;
@@ -112,6 +113,9 @@ public class RuneFlipCompanionPlugin extends Plugin
 	private RuneFlipApiClient apiClient;
 	private volatile long lastPanelRefreshMs;
 	private volatile long lastPanelOkMs;
+	/** Item currently open in the GE Buy/Sell setup (v0.8.4), -1 when none.
+	 *  Read only from the GE-current-item VarPlayer — never OCR/input. */
+	private volatile int lastSelectedGeItem = -1;
 
 	private final AtomicBoolean inFlight = new AtomicBoolean(false);
 	private final AtomicBoolean capitalInFlight = new AtomicBoolean(false);
@@ -218,6 +222,85 @@ public class RuneFlipCompanionPlugin extends Plugin
 		else if (event.getContainerId() == InventoryID.INVENTORY.getId())
 		{
 			dirtyAtMs = System.currentTimeMillis();
+		}
+	}
+
+	/**
+	 * Context-aware GE item detection (v0.8.4). Reads ONLY the read-only
+	 * "current GE item" VarPlayer to learn which item the user just opened in
+	 * the Buy/Sell setup — no OCR, no screen scraping, no synthetic input, no
+	 * widget mutation. When the selection changes, the panel swaps its Top-3
+	 * list for that item's RuneFlip context (fetched read-only); when the setup
+	 * closes it falls back to the Top-3. VarbitChanged is dispatched on the
+	 * client thread, so the var read here is safe. Display only.
+	 */
+	@Subscribe
+	public void onVarbitChanged(VarbitChanged event)
+	{
+		if (panel == null || !config.contextualGePanel())
+		{
+			return;
+		}
+		int current = GeItemSelection.selectedItemId(
+			client.getVarpValue(GeItemSelection.GE_CURRENT_ITEM_VARP));
+		if (current == lastSelectedGeItem)
+		{
+			return;
+		}
+		lastSelectedGeItem = current;
+		RuneFlipPanel target = panel;
+		if (current > 0)
+		{
+			fetchItemContext(current);
+		}
+		else if (target != null)
+		{
+			SwingUtilities.invokeLater(target::clearSelectedItem);
+		}
+	}
+
+	/**
+	 * Fetches GET /fast-flip/item/:itemId for the selected GE item and shows its
+	 * context, honoring this install's saved strategy preferences and forwarding
+	 * the anonymous client id (so the action is offer-aware). Any failure just
+	 * clears the context card — the Top-3 list stays. Display only.
+	 */
+	private void fetchItemContext(int itemId)
+	{
+		RuneFlipPanel target = panel;
+		if (target == null)
+		{
+			return;
+		}
+		String url = config.backendUrl();
+		String clientId = ensureClientId();
+		boolean assistedSetup = config.enableAssistedOfferSetup();
+		apiClient.fetchStrategyPreferences(url, clientId,
+			prefs -> apiClient.fetchFastFlipItem(url, itemId,
+				RuneFlipApiClient.strategyQueryOf(prefs), clientId,
+				res -> SwingUtilities.invokeLater(
+					() -> respectSelection(itemId, target, res, assistedSetup)),
+				() -> SwingUtilities.invokeLater(target::clearSelectedItem)),
+			() -> apiClient.fetchFastFlipItem(url, itemId, "", clientId,
+				res -> SwingUtilities.invokeLater(
+					() -> respectSelection(itemId, target, res, assistedSetup)),
+				() -> SwingUtilities.invokeLater(target::clearSelectedItem)));
+	}
+
+	/**
+	 * Applies a fetched item context only if it still matches the item the user
+	 * has open (a slow response for a previous selection is dropped, not shown
+	 * over the current one).
+	 */
+	private void respectSelection(
+		int itemId,
+		RuneFlipPanel target,
+		RuneFlipData.FastFlipItemContextResponse res,
+		boolean assistedSetup)
+	{
+		if (lastSelectedGeItem == itemId)
+		{
+			target.updateSelectedItem(res, assistedSetup);
 		}
 	}
 

@@ -78,6 +78,31 @@ public class RuneFlipApiClient
 	}
 
 	/**
+	 * Full RuneFlip context for ONE item (v0.8.4) — GET /fast-flip/item/{itemId}
+	 * with the optional Strategy Engine params appended (same source as
+	 * {@link #strategyQueryOf}). Used by the contextual side panel when the user
+	 * opens an item in the GE Buy/Sell setup. The client id is forwarded (v0.8.2
+	 * opt-in) so the recommended action can reflect this install's existing offer
+	 * on the item. The backend never 404/500s here: an unknown or not-recommended
+	 * item still returns 200 with recommended=false. Display-only — the response
+	 * is rendered verbatim, never acted on.
+	 */
+	public void fetchFastFlipItem(
+		String backendUrl,
+		int itemId,
+		String strategyQuery,
+		String clientId,
+		Consumer<RuneFlipData.FastFlipItemContextResponse> onSuccess,
+		Runnable onFailure)
+	{
+		String query = strategyQuery == null || strategyQuery.isEmpty()
+			? ""
+			: "?" + strategyQuery.replaceFirst("^&", "");
+		get(backendUrl, "/fast-flip/item/" + itemId + query, clientId,
+			RuneFlipData.FastFlipItemContextResponse.class, onSuccess, onFailure);
+	}
+
+	/**
 	 * This install's saved strategy preferences (v0.8.1) — private, scoped by
 	 * the anonymous client id. A failing fetch (offline, or a pre-0.8.1
 	 * backend answering 404) simply means the default strategy applies.
