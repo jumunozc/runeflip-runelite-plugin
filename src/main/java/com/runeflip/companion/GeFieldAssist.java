@@ -68,11 +68,13 @@ final class GeFieldAssist
 
 	/**
 	 * Classifies the GE chatbox prompt into the editor being shown. The real
-	 * prompts (v0.8.13): "What would you like to buy?" / "What would you like
-	 * to sell?" (item search), "Set a price for each item:" (price), "How
-	 * many do you wish to buy?" / "How many do you wish to sell?" (quantity).
-	 * Unknown or missing prompts yield {@link Field#NONE} — no assist is
-	 * offered for an editor we cannot positively identify.
+	 * prompts (v0.8.13, +search helper in v0.8.14): "What would you like to
+	 * buy?" / "What would you like to sell?" and the helper line "Start
+	 * typing the name of an item to search for it." (item search), "Set a
+	 * price for each item:" (price), "How many do you wish to buy?" / "How
+	 * many do you wish to sell?" (quantity). Unknown or missing prompts yield
+	 * {@link Field#NONE} — no assist is offered for an editor we cannot
+	 * positively identify.
 	 */
 	static Field fieldForPrompt(String chatboxTitle)
 	{
@@ -81,7 +83,8 @@ final class GeFieldAssist
 			return Field.NONE;
 		}
 		String title = chatboxTitle.toLowerCase();
-		if (title.contains("what would you like"))
+		if (title.contains("what would you like")
+			|| title.contains("start typing the name of an item"))
 		{
 			return Field.ITEM_SEARCH;
 		}
@@ -94,6 +97,55 @@ final class GeFieldAssist
 			return Field.PRICE;
 		}
 		return Field.NONE;
+	}
+
+	/**
+	 * Whether the GE ITEM SEARCH editor is open (v0.8.14 hotfix). The old
+	 * detection relied solely on the client reporting the SEARCH meslayer
+	 * mode — which the live GE search does not always do, leaving the real
+	 * "What would you like to buy?" screen unrecognized (no hint, no menu
+	 * option, no hotkey). Detection is now structural; the search is open
+	 * when the GE offer setup is showing AND any ONE positive signal holds:
+	 * <ul>
+	 *   <li>the client reports the SEARCH input mode (the original signal);</li>
+	 *   <li>the chatbox search-results layer is showing — the layer that
+	 *       carries "Start typing the name of an item to search for it." even
+	 *       when it is the only prompt visible;</li>
+	 *   <li>the chatbox prompt is one of the EXACT search prompts.</li>
+	 * </ul>
+	 * No signal → not a search → no assist (unknown editors stay unassisted).
+	 * This only ever gates DISPLAY plus the click/hotkey-gated prepare of the
+	 * pending search text; nothing is selected, submitted or executed.
+	 */
+	static boolean searchEditorOpen(
+		boolean offerSetupOpen,
+		boolean searchModeReported,
+		boolean searchResultsShowing,
+		String chatboxPrompt)
+	{
+		return offerSetupOpen
+			&& (searchModeReported || searchResultsShowing
+				|| fieldForPrompt(chatboxPrompt) == Field.ITEM_SEARCH);
+	}
+
+	/**
+	 * Resolves WHICH editor is active from the observed chatbox state
+	 * (v0.8.14). A value editor with a qty/price prompt is authoritative —
+	 * the prompt names the field being edited even if a stale search signal
+	 * lingers. Otherwise a detected search wins. Anything else — including a
+	 * value editor whose prompt we cannot classify — is {@link Field#NONE}:
+	 * no assist for an editor we cannot positively identify.
+	 */
+	static Field classifyEditor(
+		boolean valueEditorOpen, boolean searchOpen, String chatboxPrompt)
+	{
+		Field byPrompt = fieldForPrompt(chatboxPrompt);
+		if (valueEditorOpen
+			&& (byPrompt == Field.QUANTITY || byPrompt == Field.PRICE))
+		{
+			return byPrompt;
+		}
+		return searchOpen ? Field.ITEM_SEARCH : Field.NONE;
 	}
 
 	/**
@@ -205,6 +257,32 @@ final class GeFieldAssist
 	}
 
 	// ── Chatbox hints (v0.8.13, Copilot-style visible assist) ────────────────
+
+	/**
+	 * The full visible-hint model (v0.8.14): which text — if any — the
+	 * chatbox hint shows for the active editor. Search shows the #1 primary
+	 * suggestion by name (never #2/#3 — the caller only ever holds the
+	 * primary); the value editors show the press-hotkey copy for their
+	 * value. A missing value or an unidentified/closed editor returns null,
+	 * which REMOVES the hint. Display only — showing a hint performs no
+	 * action.
+	 */
+	static String hintFor(
+		Field field, String primaryName, Long qty, Long price, String keyLabel)
+	{
+		switch (field)
+		{
+			case ITEM_SEARCH:
+				return primaryName == null || primaryName.trim().isEmpty()
+					? null : searchHint(primaryName);
+			case QUANTITY:
+				return qty == null ? null : qtyHint(qty, keyLabel);
+			case PRICE:
+				return price == null ? null : priceHint(price, keyLabel);
+			default:
+				return null;
+		}
+	}
 
 	/** GE search hint: "RuneFlip item: Death rune" — always the #1 primary
 	 *  suggestion, never #2/#3. */

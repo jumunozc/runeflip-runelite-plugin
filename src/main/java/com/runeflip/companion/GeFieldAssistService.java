@@ -115,36 +115,44 @@ class GeFieldAssistService
 	//    click/hotkey) ──────────────────────────────────────────────────────
 
 	/**
-	 * Which GE editor is active right now (v0.8.13): the item search, the
-	 * qty/price chatbox editor (classified by its real prompt), or NONE.
-	 * An unknown prompt maps to NONE — no assist for an editor we cannot
-	 * positively identify.
+	 * Which GE editor is active right now (v0.8.13, restructured in the
+	 * v0.8.14 hotfix): the item search, the qty/price chatbox editor
+	 * (classified by its real prompt), or NONE. All inputs are read-only
+	 * observations; the pure {@link GeFieldAssist#classifyEditor} decides.
+	 * An unknown prompt still maps to NONE — no assist for an editor we
+	 * cannot positively identify.
 	 */
 	GeFieldAssist.Field activeField()
 	{
-		if (isItemSearchOpen())
-		{
-			return GeFieldAssist.Field.ITEM_SEARCH;
-		}
-		if (isValueEditorOpen())
-		{
-			GeFieldAssist.Field field =
-				GeFieldAssist.fieldForPrompt(chatboxPrompt());
-			// The value editor only edits qty/price; a search-looking prompt
-			// here would be a misread — stay honest and offer nothing.
-			return field == GeFieldAssist.Field.ITEM_SEARCH
-				? GeFieldAssist.Field.NONE
-				: field;
-		}
-		return GeFieldAssist.Field.NONE;
+		return GeFieldAssist.classifyEditor(
+			isValueEditorOpen(), isItemSearchOpen(), chatboxPrompt());
 	}
 
-	/** GE offer setup open AND the item-search chatbox is the active input. */
+	/**
+	 * GE offer setup open AND the item-search chatbox is showing. Detection
+	 * is structural since the v0.8.14 hotfix (the live client does not
+	 * always report the SEARCH input mode for the GE item search): the
+	 * reported mode, the search-results layer — the widget carrying "Start
+	 * typing the name of an item to search for it." even when that helper is
+	 * the only prompt visible — and the exact search prompts all count; see
+	 * {@link GeFieldAssist#searchEditorOpen}.
+	 */
 	boolean isItemSearchOpen()
 	{
-		return isOfferSetupOpen()
-			&& client.getVarcIntValue(VarClientInt.INPUT_TYPE)
-				== InputType.SEARCH.getType();
+		return GeFieldAssist.searchEditorOpen(
+			isOfferSetupOpen(),
+			client.getVarcIntValue(VarClientInt.INPUT_TYPE)
+				== InputType.SEARCH.getType(),
+			isSearchResultsShowing(),
+			chatboxPrompt());
+	}
+
+	/** The chatbox GE search-results layer is present and showing. */
+	boolean isSearchResultsShowing()
+	{
+		Widget results =
+			client.getWidget(ComponentID.CHATBOX_GE_SEARCH_RESULTS);
+		return results != null && !results.isHidden();
 	}
 
 	/** GE offer setup open AND a chatbox value input (qty/price) is open. */
@@ -176,5 +184,41 @@ class GeFieldAssistService
 		Widget container =
 			client.getWidget(ComponentID.GRAND_EXCHANGE_OFFER_CONTAINER);
 		return container != null && !container.isHidden();
+	}
+
+	// ── diagnostics (v0.8.14) ────────────────────────────────────────────────
+
+	/**
+	 * One-line, read-only diagnostic snapshot of the GE chatbox state: the
+	 * exact prompt, the reported meslayer mode and the id / parent id /
+	 * visibility / bounds of every widget the assist depends on. Logged at
+	 * DEBUG by the plugin when the editor state changes. Never includes a
+	 * token or the client id.
+	 */
+	String debugState()
+	{
+		return "offerSetup=" + isOfferSetupOpen()
+			+ " mesLayerMode=" + client.getVarcIntValue(VarClientInt.INPUT_TYPE)
+			+ " prompt=\"" + chatboxPrompt() + '"'
+			+ " container=" + describe(
+				client.getWidget(ComponentID.CHATBOX_CONTAINER))
+			+ " fullInput=" + describe(
+				client.getWidget(ComponentID.CHATBOX_FULL_INPUT))
+			+ " searchResults=" + describe(
+				client.getWidget(ComponentID.CHATBOX_GE_SEARCH_RESULTS));
+	}
+
+	/** id/parent/visibility/bounds of one widget, or "absent". Read-only. */
+	private static String describe(Widget widget)
+	{
+		if (widget == null)
+		{
+			return "absent";
+		}
+		java.awt.Rectangle b = widget.getBounds();
+		return widget.getId() + "(parent " + widget.getParentId() + ") "
+			+ (widget.isHidden() ? "hidden" : "visible")
+			+ (b == null ? ""
+				: " @" + b.x + "," + b.y + " " + b.width + "x" + b.height);
 	}
 }

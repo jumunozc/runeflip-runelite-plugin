@@ -172,7 +172,8 @@ public class RuneFlipCompanionPlugin extends Plugin
 	/** The user's assist hotkey, listened via RuneLite's KeyManager (the
 	 *  user's OWN key press — never synthesized). */
 	private GeFieldAssistHotkey assistHotkey;
-	/** Last hint rendered (debug log + idempotent updates); null = none. */
+	/** Last hint-state DEBUG snapshot logged (editor, hint, render result,
+	 *  widget states) — dedupes the per-tick diagnostic; null = none. */
 	private String lastHintText;
 
 	private final AtomicBoolean inFlight = new AtomicBoolean(false);
@@ -564,56 +565,61 @@ public class RuneFlipCompanionPlugin extends Plugin
 		GeFieldAssist.Field field = assist.activeField();
 		String keyLabel = config.geFieldAssistHotkey().toString();
 		RuneFlipData.FastFlipItem primary = primaryFlip;
-		String text = null;
+		String primaryName = primary == null ? null : primary.itemName;
+		Long qty = field == GeFieldAssist.Field.QUANTITY
+			? GeFieldAssist.qtyFor(lastSelectedGeItem, lastItemContext, primary)
+			: null;
+		Long price = field == GeFieldAssist.Field.PRICE
+			? GeFieldAssist.priceFor(
+				lastSelectedGeItem, assist.isSellOffer(), lastItemContext, primary)
+			: null;
+		String text =
+			GeFieldAssist.hintFor(field, primaryName, qty, price, keyLabel);
+
 		Runnable onClick = null;
-		if (field == GeFieldAssist.Field.ITEM_SEARCH
-			&& primary != null && primary.itemName != null)
+		if (text != null && field == GeFieldAssist.Field.ITEM_SEARCH)
 		{
-			String name = primary.itemName;
-			text = GeFieldAssist.searchHint(name);
+			String name = primaryName;
 			onClick = () -> assist.prepareItemSearch(
 				name, GeFieldAssist.ActionSource.USER_CLICK);
 		}
-		else if (field == GeFieldAssist.Field.QUANTITY)
+		else if (text != null && field == GeFieldAssist.Field.QUANTITY)
 		{
-			Long qty = GeFieldAssist.qtyFor(
-				lastSelectedGeItem, lastItemContext, primary);
-			if (qty != null)
-			{
-				long value = qty;
-				text = GeFieldAssist.qtyHint(value, keyLabel);
-				onClick = () -> assist.prepareQuantity(
-					value, GeFieldAssist.ActionSource.USER_CLICK);
-			}
+			long value = qty;
+			onClick = () -> assist.prepareQuantity(
+				value, GeFieldAssist.ActionSource.USER_CLICK);
 		}
-		else if (field == GeFieldAssist.Field.PRICE)
+		else if (text != null && field == GeFieldAssist.Field.PRICE)
 		{
-			Long price = GeFieldAssist.priceFor(
-				lastSelectedGeItem, assist.isSellOffer(), lastItemContext, primary);
-			if (price != null)
-			{
-				long value = price;
-				text = GeFieldAssist.priceHint(value, keyLabel);
-				onClick = () -> assist.preparePrice(
-					value, GeFieldAssist.ActionSource.USER_CLICK);
-			}
+			long value = price;
+			onClick = () -> assist.preparePrice(
+				value, GeFieldAssist.ActionSource.USER_CLICK);
 		}
 
-		if (text == null)
+		GeChatboxHint.Result result = text == null
+			? hintView.clear()
+			: hintView.show(text, onClick);
+
+		// Safe diagnostic (v0.8.14): editor kind, open item id, the #1
+		// primary (id + name), the hint copy, the render result and the
+		// chatbox widget snapshot (ids, hidden flags, bounds, exact prompt)
+		// — logged only when the state CHANGES, and never a token, never
+		// the client id.
+		if (log.isDebugEnabled())
 		{
-			hintView.clear();
-			lastHintText = null;
-			return;
+			String snapshot = "editor=" + field
+				+ " openItem=" + lastSelectedGeItem
+				+ " primary=" + (primary == null
+					? "none" : primary.itemId + " \"" + primaryName + '"')
+				+ " hint=" + (text == null ? "none" : '"' + text + '"')
+				+ " render=" + result
+				+ " | " + assist.debugState();
+			if (!snapshot.equals(lastHintText))
+			{
+				log.debug("RuneFlip GE hint: {}", snapshot);
+				lastHintText = snapshot;
+			}
 		}
-		if (!text.equals(lastHintText))
-		{
-			// Safe diagnostic (v0.8.13): editor kind, open item id and the
-			// hint copy — never a token, never the client id.
-			log.debug("RuneFlip GE hint: editor={} item={} hint=\"{}\"",
-				field, lastSelectedGeItem, text);
-			lastHintText = text;
-		}
-		hintView.show(text, onClick);
 	}
 
 	/**

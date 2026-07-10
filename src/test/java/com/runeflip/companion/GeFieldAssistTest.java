@@ -70,6 +70,112 @@ public class GeFieldAssistTest
 		assertEquals(GeFieldAssist.Field.NONE, GeFieldAssist.fieldForPrompt(null));
 	}
 
+	// ── GE search detection (v0.8.14 hotfix) ─────────────────────────────────
+
+	@Test
+	public void theSearchHelperPromptCountsAsItemSearch()
+	{
+		// The line the real GE search shows before the user types anything.
+		assertEquals(GeFieldAssist.Field.ITEM_SEARCH,
+			GeFieldAssist.fieldForPrompt(
+				"Start typing the name of an item to search for it."));
+	}
+
+	@Test
+	public void realBuyAndSellSearchPromptsOpenTheSearchEditor()
+	{
+		// The live client does not always report the SEARCH meslayer mode —
+		// the exact prompt alone must identify the editor.
+		assertTrue(GeFieldAssist.searchEditorOpen(
+			true, false, false, "What would you like to buy?"));
+		assertTrue(GeFieldAssist.searchEditorOpen(
+			true, false, false, "What would you like to sell?"));
+	}
+
+	@Test
+	public void searchIsDetectedWhenOnlyTheSecondaryPromptIsVisible()
+	{
+		// The results layer carries "Start typing…" — its visibility alone
+		// identifies the search even when no title prompt is readable…
+		assertTrue(GeFieldAssist.searchEditorOpen(true, false, true, null));
+		// …as does the helper text itself when it is the only prompt found.
+		assertTrue(GeFieldAssist.searchEditorOpen(true, false, false,
+			"Start typing the name of an item to search for it."));
+		// And the original meslayer-mode signal still counts.
+		assertTrue(GeFieldAssist.searchEditorOpen(true, true, false, null));
+	}
+
+	@Test
+	public void unknownPromptOrClosedOfferSetupMeansNoSearchEditor()
+	{
+		assertFalse(GeFieldAssist.searchEditorOpen(
+			true, false, false, "Enter your name:"));
+		assertFalse(GeFieldAssist.searchEditorOpen(true, false, false, null));
+		// Outside the GE offer setup no signal counts (e.g. a bank search).
+		assertFalse(GeFieldAssist.searchEditorOpen(
+			false, true, true, "What would you like to buy?"));
+	}
+
+	@Test
+	public void classifyEditorTrustsTheValueEditorsRealPromptFirst()
+	{
+		assertEquals(GeFieldAssist.Field.QUANTITY, GeFieldAssist.classifyEditor(
+			true, false, "How many do you wish to buy?"));
+		assertEquals(GeFieldAssist.Field.PRICE, GeFieldAssist.classifyEditor(
+			true, false, "Set a price for each item:"));
+		// The v0.8.14 regression case: the GE search's own input is a
+		// full-input widget under a search prompt — that IS the search
+		// editor (previously misread as "value editor" and dropped to NONE).
+		assertEquals(GeFieldAssist.Field.ITEM_SEARCH,
+			GeFieldAssist.classifyEditor(true, true, "What would you like to buy?"));
+		// A value editor whose prompt we cannot classify stays unassisted.
+		assertEquals(GeFieldAssist.Field.NONE, GeFieldAssist.classifyEditor(
+			true, false, "Enter your name:"));
+		assertEquals(GeFieldAssist.Field.NONE,
+			GeFieldAssist.classifyEditor(false, false, null));
+	}
+
+	// ── visible hint model (v0.8.14) ─────────────────────────────────────────
+
+	@Test
+	public void primaryPlusSearchEditorYieldsTheVisibleHint()
+	{
+		assertEquals("RuneFlip item: Death rune", GeFieldAssist.hintFor(
+			GeFieldAssist.Field.ITEM_SEARCH, "Death rune",
+			null, null, "Right Brace"));
+	}
+
+	@Test
+	public void valueEditorsHintTheirOwnValues()
+	{
+		assertEquals(GeFieldAssist.qtyHint(250, "Right Brace"),
+			GeFieldAssist.hintFor(GeFieldAssist.Field.QUANTITY,
+				"Death rune", 250L, null, "Right Brace"));
+		assertEquals(GeFieldAssist.priceHint(1_049, "Right Brace"),
+			GeFieldAssist.hintFor(GeFieldAssist.Field.PRICE,
+				"Death rune", null, 1_049L, "Right Brace"));
+	}
+
+	@Test
+	public void closingOrUnknownEditorRemovesTheHint()
+	{
+		// NONE (editor closed / unknown prompt) renders nothing — the null
+		// makes the plugin REMOVE the chatbox hint.
+		assertNull(GeFieldAssist.hintFor(GeFieldAssist.Field.NONE,
+			"Death rune", 250L, 100L, "Right Brace"));
+		// No #1 primary → no search hint (only the primary may ever feed
+		// the search assist; #2/#3 are never candidates).
+		assertNull(GeFieldAssist.hintFor(GeFieldAssist.Field.ITEM_SEARCH,
+			null, null, null, "Right Brace"));
+		assertNull(GeFieldAssist.hintFor(GeFieldAssist.Field.ITEM_SEARCH,
+			"  ", null, null, "Right Brace"));
+		// Value editors without a value render nothing.
+		assertNull(GeFieldAssist.hintFor(GeFieldAssist.Field.QUANTITY,
+			"Death rune", null, null, "Right Brace"));
+		assertNull(GeFieldAssist.hintFor(GeFieldAssist.Field.PRICE,
+			"Death rune", null, null, "Right Brace"));
+	}
+
 	// ── chatbox hint copy (v0.8.13, Copilot-style) ───────────────────────────
 
 	@Test
