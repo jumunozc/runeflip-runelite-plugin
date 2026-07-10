@@ -91,10 +91,6 @@ public class RuneFlipPanel extends PluginPanel
 	private final JPanel pairingInputRow = new JPanel(new BorderLayout(6, 0));
 	private final JLabel pairingHint = new JLabel();
 
-	/** Assisted Offer Setup opt-in (v0.8.3), refreshed from config on each
-	 *  Fast Flip update. OFF by default — Copy buttons stay hidden. */
-	private boolean assistedSetupEnabled = false;
-
 	/** Context-aware GE panel opt-in (v0.8.5), refreshed from config. When ON,
 	 *  the panel is focused: only the selected-item card OR the Top 3, never the
 	 *  legacy dashboard or GE completed. OFF keeps the full legacy panel. */
@@ -126,10 +122,25 @@ public class RuneFlipPanel extends PluginPanel
 	/** Price Edge fallback disclaimer (v0.7.1), same rule as above. */
 	static final String PRICE_EDGE_DISCLAIMER =
 		"Targets are estimates. Review manually.";
-	/** Assisted Offer Setup note (v0.8.3), shown whenever Copy buttons are. */
-	static final String ASSISTED_SETUP_NOTE =
-		"Assisted setup prepares values only. You must review and confirm "
-			+ "manually.";
+	/**
+	 * Primary GE suggestion chip (v0.8.10) — the compact marker on the FIRST
+	 * row of the Fast Flip list. The #1 item is RuneFlip's single primary
+	 * suggestion for the user's next manual GE search, Flipping-Copilot style;
+	 * #2/#3 stay informational and are never selectable as a suggestion.
+	 *
+	 * <p><b>Primary GE Search Assist blocked — no safe API found.</b> The chip
+	 * is deliberately DISPLAY-ONLY. Research (v0.8.10, re-confirming the v0.6
+	 * finding): RuneLite exposes no safe, client-supported API to (a) set the
+	 * GE search "previous search" item, (b) prepare the GE search chatbox, or
+	 * (c) surface an item inside the GE search results. Every known path —
+	 * RuneLite's own GrandExchangePlugin included — goes through
+	 * {@code setVarcStrValue(VarClientStr.INPUT_TEXT, …)} plus
+	 * {@code runScript}, widget mutation, or synthetic input, all of which the
+	 * no-botting contract (and ComplianceScanTest) forbids. So the user reads
+	 * the chip and types the search manually in the official client; nothing
+	 * is written into the game.
+	 */
+	static final String GE_SUGGESTION_CHIP = "GE suggestion";
 	/** Short contextual-card footer (v0.8.5) — the compliance rule, compact. */
 	static final String SHORT_DISCLAIMER = "Review manually.";
 	/** Fast Flip card footer (v0.8.5-c) — the compliance rule in one short line,
@@ -536,11 +547,8 @@ public class RuneFlipPanel extends PluginPanel
 	 * target (AVOID / not recommended / no data) it shows "No RuneFlip target
 	 * yet" plus Open Wiki, honestly.
 	 */
-	void updateSelectedItem(
-		RuneFlipData.FastFlipItemContextResponse response,
-		boolean assistedSetup)
+	void updateSelectedItem(RuneFlipData.FastFlipItemContextResponse response)
 	{
-		this.assistedSetupEnabled = assistedSetup;
 		selectedCard.removeAll();
 		if (response == null)
 		{
@@ -548,7 +556,7 @@ public class RuneFlipPanel extends PluginPanel
 			return;
 		}
 		this.hasSelection = true;
-		buildSelectedCard(response, assistedSetup);
+		buildSelectedCard(response);
 		applyVisibility();
 	}
 
@@ -859,12 +867,12 @@ public class RuneFlipPanel extends PluginPanel
 	 * SelectedItemCard (v0.8.7 design, 1b): head (icon + name + risk chip +
 	 * confidence), then the WIKI Low/High cells, the TARGET Buy/Sell cells, the
 	 * EDGE VS WIKI bullets (backend messages verbatim), the PLAN grid with the
-	 * Profit highlight, the ACTION chip + reason, the Open Wiki CTA and the
-	 * opt-in ASSISTED block. Display only, ending on "Review manually."
+	 * Profit highlight, the ACTION chip + reason and the Open Wiki CTA.
+	 * Display only, ending on "Review manually." The v0.8.3 Copy price/qty
+	 * block was removed in v0.8.10 — the game accepts no paste, so the buttons
+	 * were useless in real play.
 	 */
-	private void buildSelectedCard(
-		RuneFlipData.FastFlipItemContextResponse res,
-		boolean assistedSetup)
+	private void buildSelectedCard(RuneFlipData.FastFlipItemContextResponse res)
 	{
 		// Head: icon + name + risk chip + confidence (all backend data).
 		JPanel head = new JPanel(new BorderLayout(8, 0));
@@ -1014,23 +1022,9 @@ public class RuneFlipPanel extends PluginPanel
 			selectedCard.add(Box.createVerticalStrut(6));
 		}
 
-		// Open Wiki CTA + opt-in Assisted block (clipboard only, v0.8.3).
+		// Open Wiki CTA — the card's only external action (v0.8.10: no Copy
+		// price/qty; the game accepts no paste, so they assisted nothing).
 		selectedCard.add(openWikiRow(res.itemId));
-		if (showAssistedSetup(res.action, assistedSetup))
-		{
-			selectedCard.add(Box.createVerticalStrut(4));
-			JLabel assistedTitle = new JLabel("ASSISTED · OPTIONAL");
-			assistedTitle.setFont(FontManager.getRunescapeSmallFont());
-			assistedTitle.setForeground(FAINT);
-			assistedTitle.setAlignmentX(LEFT_ALIGNMENT);
-			selectedCard.add(assistedTitle);
-			selectedCard.add(assistedSetupRow(res.action));
-			JLabel setupNote = new JLabel(html(safe(ASSISTED_SETUP_NOTE)));
-			setupNote.setFont(FontManager.getRunescapeSmallFont());
-			setupNote.setForeground(GOLD);
-			setupNote.setAlignmentX(LEFT_ALIGNMENT);
-			selectedCard.add(setupNote);
-		}
 
 		// Short footer (goal 5): the compliance rule, compact.
 		selectedCard.add(Box.createVerticalStrut(4));
@@ -1149,20 +1143,7 @@ public class RuneFlipPanel extends PluginPanel
 	 */
 	void updateFastFlip(RuneFlipData.FastFlipOverviewResponse response)
 	{
-		updateFastFlip(response, assistedSetupEnabled);
-	}
-
-	/**
-	 * Rebuilds the Fast Flip card. `assistedSetup` is the opt-in flag
-	 * (config, OFF by default): when true, entries whose recommended action
-	 * points at a concrete price show clipboard-only Copy buttons (v0.8.3).
-	 * Everything else stays display-only.
-	 */
-	void updateFastFlip(
-		RuneFlipData.FastFlipOverviewResponse response,
-		boolean assistedSetup)
-	{
-		updateFastFlip(response, assistedSetup, false);
+		updateFastFlip(response, false);
 	}
 
 	/**
@@ -1173,10 +1154,8 @@ public class RuneFlipPanel extends PluginPanel
 	 */
 	void updateFastFlip(
 		RuneFlipData.FastFlipOverviewResponse response,
-		boolean assistedSetup,
 		boolean defaultFallback)
 	{
-		this.assistedSetupEnabled = assistedSetup;
 		fastFlipCard.removeAll();
 		// A rendered response ends the in-flight indicator (v0.8.10); stale
 		// responses never reach here (the plugin drops them by sequence).
@@ -1248,7 +1227,6 @@ public class RuneFlipPanel extends PluginPanel
 			fastFlipCard.add(Box.createVerticalStrut(4));
 		}
 
-		boolean anyAssistedShown = false;
 		for (int i = 0; i < shown; i++)
 		{
 			if (i > 0)
@@ -1256,26 +1234,26 @@ public class RuneFlipPanel extends PluginPanel
 				fastFlipCard.add(Box.createVerticalStrut(6));
 			}
 			RuneFlipData.FastFlipItem flip = selection.rows.get(i);
-			fastFlipCard.add(fastFlipEntry(flip, i + 1, assistedSetup));
-			anyAssistedShown =
-				anyAssistedShown || showAssistedSetup(flip.action, assistedSetup);
+			fastFlipCard.add(fastFlipEntry(flip, i + 1,
+				isPrimaryGeSuggestion(selection.source, i + 1)));
 		}
 
 		fastFlipCard.add(Box.createVerticalStrut(6));
-
-		// Assisted Offer Setup compliance note (v0.8.3): shown whenever any
-		// Copy button was rendered, so the "prepares values only" limit is
-		// always visible next to the buttons. The compliance footer itself is
-		// the panel-level fixed line (v0.8.7 design).
-		if (anyAssistedShown)
-		{
-			JLabel setupNote = new JLabel(html(safe(ASSISTED_SETUP_NOTE)));
-			setupNote.setFont(FontManager.getRunescapeSmallFont());
-			setupNote.setForeground(GOLD);
-			setupNote.setAlignmentX(LEFT_ALIGNMENT);
-			fastFlipCard.add(setupNote);
-		}
 		revalidateAll();
+	}
+
+	/**
+	 * Whether one Fast Flip row is THE primary GE suggestion (v0.8.10): always
+	 * — and only — the FIRST rendered row of the current selection, whichever
+	 * list it came from (Top ranking or the "General ideas" fallback). #2/#3
+	 * are informational and can never be picked as a suggestion; the empty and
+	 * offline states have no suggestion at all. Display-only: the marked item
+	 * is what the user searches manually in the official GE — see
+	 * {@link #GE_SUGGESTION_CHIP} for why no in-game assist exists.
+	 */
+	static boolean isPrimaryGeSuggestion(FastFlipSelection.Source source, int rank)
+	{
+		return source != FastFlipSelection.Source.NONE && rank == 1;
 	}
 
 	/**
@@ -1460,20 +1438,25 @@ public class RuneFlipPanel extends PluginPanel
 	/**
 	 * One TopFastFlipRow (v0.8.7 design): a bordered card — #rank chip + icon +
 	 * name + action chip, then buy → sell with the expected profit highlighted
-	 * right, then ROI + risk chip + confidence; plus the opt-in clipboard-only
-	 * Copy buttons when the action carries a target price. Display only —
-	 * figures come verbatim from the backend.
+	 * right, then ROI + risk chip + confidence. The #1 row (v0.8.10) carries a
+	 * gold-tinted border and the "GE suggestion" chip — the single primary item
+	 * to search manually in the GE. Display only — figures come verbatim from
+	 * the backend, and no Copy buttons remain (removed in v0.8.10: the game
+	 * accepts no paste).
 	 */
 	private JPanel fastFlipEntry(
 		RuneFlipData.FastFlipItem flip,
 		int rank,
-		boolean assistedSetup)
+		boolean primary)
 	{
 		JPanel entry = new JPanel();
 		entry.setLayout(new BoxLayout(entry, BoxLayout.Y_AXIS));
 		entry.setBackground(CARD_BG);
+		// The primary row is the focus: same gold-tinted border treatment as
+		// the selected-item card; the rest keep the neutral card border.
 		entry.setBorder(BorderFactory.createCompoundBorder(
-			BorderFactory.createLineBorder(CARD_BORDER),
+			BorderFactory.createLineBorder(primary
+				? new Color(0x4f, 0x44, 0x2f) : CARD_BORDER),
 			BorderFactory.createEmptyBorder(5, 7, 5, 7)));
 		entry.setAlignmentX(LEFT_ALIGNMENT);
 
@@ -1509,6 +1492,25 @@ public class RuneFlipPanel extends PluginPanel
 		head.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
 		entry.add(head);
 		entry.add(Box.createVerticalStrut(3));
+
+		// Primary GE suggestion chip (v0.8.10) — DISPLAY ONLY. The chip marks
+		// what to search manually; it is not a button and writes nothing into
+		// the game (see GE_SUGGESTION_CHIP: no safe GE-search API exists).
+		if (primary)
+		{
+			JPanel suggestionRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+			suggestionRow.setOpaque(false);
+			suggestionRow.setAlignmentX(LEFT_ALIGNMENT);
+			JLabel suggestionChip = chip(GE_SUGGESTION_CHIP, GOLD, CHIP_GOLD_BG);
+			suggestionChip.setToolTipText(
+				"<html>RuneFlip's primary suggestion — search this item "
+					+ "manually in the GE.<br>RuneFlip never fills, searches or "
+					+ "confirms anything for you.</html>");
+			suggestionRow.add(suggestionChip);
+			suggestionRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 18));
+			entry.add(suggestionRow);
+			entry.add(Box.createVerticalStrut(3));
+		}
 
 		// Row 2: buy → sell left, expected whole-flip profit highlighted right.
 		JPanel legs = new JPanel(new BorderLayout(6, 0));
@@ -1553,12 +1555,6 @@ public class RuneFlipPanel extends PluginPanel
 		meta.setMaximumSize(new Dimension(Integer.MAX_VALUE, 20));
 		entry.add(meta);
 
-		// Assisted Offer Setup (v0.8.3, opt-in): clipboard-only Copy buttons.
-		if (showAssistedSetup(flip.action, assistedSetup))
-		{
-			entry.add(assistedSetupRow(flip.action));
-		}
-
 		return entry;
 	}
 
@@ -1582,57 +1578,6 @@ public class RuneFlipPanel extends PluginPanel
 			return "?";
 		}
 		return "MEDIUM".equals(riskLevel) ? "MED" : riskLevel;
-	}
-
-	/**
-	 * Whether the opt-in Assisted Offer Setup Copy buttons should be shown for
-	 * one action. All must hold: the config is ON, the action exists and is
-	 * reviewOnly (the compliance invariant every action carries), and it
-	 * points at a concrete price to copy (BUY_NEW / SELL_EXISTING /
-	 * MODIFY_BUY / MODIFY_SELL). HOLD / ABORT_* / AVOID carry no target, so no
-	 * buttons appear. This decides VISIBILITY only — the buttons themselves
-	 * are clipboard-only (see {@link #assistedSetupRow}).
-	 */
-	static boolean showAssistedSetup(
-		RuneFlipData.RecommendedAction action, boolean enabled)
-	{
-		return enabled
-			&& action != null
-			&& Boolean.TRUE.equals(action.reviewOnly)
-			&& action.targetPrice != null;
-	}
-
-	/** Copy-quantity is offered only when the action carries a target qty. */
-	static boolean showCopyQuantity(RuneFlipData.RecommendedAction action)
-	{
-		return action != null && action.targetQuantity != null;
-	}
-
-	/**
-	 * COMPLIANCE — Assisted Offer Setup (v0.8.3). Every control built here
-	 * does exactly ONE thing: copy a backend-computed value to the system
-	 * clipboard on an explicit user click. There is deliberately NO code path
-	 * from these buttons to the game client — no field is filled, no offer is
-	 * confirmed, cancelled or collected, no menu/widget/varp/varc is touched,
-	 * no mouse or keyboard input is synthesized. RuneFlip may assist input,
-	 * but never execute intent. Do not add anything here that reaches the
-	 * client; if a genuinely safe prepare-field API ever appears it must be
-	 * user-click only and still never confirm/cancel/collect.
-	 */
-	private JPanel assistedSetupRow(RuneFlipData.RecommendedAction action)
-	{
-		JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 2));
-		row.setOpaque(false);
-		row.setAlignmentX(LEFT_ALIGNMENT);
-		// Clipboard only — the exact backend target value, copied verbatim.
-		row.add(actionButton("Copy price",
-			() -> copy(String.valueOf(action.targetPrice))));
-		if (showCopyQuantity(action))
-		{
-			row.add(actionButton("Copy qty",
-				() -> copy(String.valueOf(action.targetQuantity))));
-		}
-		return row;
 	}
 
 	/**
@@ -2045,10 +1990,10 @@ public class RuneFlipPanel extends PluginPanel
 		actions.add(disabledSearchButton());
 		actions.add(actionButton("Open Wiki", () -> LinkBrowser.browse(
 			"https://prices.runescape.wiki/osrs/item/" + rec.itemId)));
+		// v0.8.10: the price/qty Copy buttons were removed everywhere — the
+		// game accepts no paste, so they assisted nothing in real play. Copy
+		// name stays: it is the documented manual-search aid.
 		actions.add(actionButton("Copy name", () -> copy(rec.name)));
-		actions.add(actionButton("Copy buy price", () -> copy(String.valueOf(rec.buyPrice))));
-		actions.add(actionButton("Copy sell price", () -> copy(String.valueOf(rec.sellPrice))));
-		actions.add(actionButton("Copy qty", () -> copy(String.valueOf(rec.suggestedQuantity))));
 		topCard.add(actions);
 		topCard.add(Box.createVerticalStrut(6));
 

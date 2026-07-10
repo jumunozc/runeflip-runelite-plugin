@@ -29,10 +29,18 @@ or session data; never receives commands from the backend.
 - **Sidebar panel (informational only).** Shows connection status, the
   backend's top flip recommendations (price, est. profit, ROI, risk, score
   and reason) and your latest completed offers. The only interactions are
-  **Refresh**, **Open Wiki** (external browser) and **Copy** to the system
-  clipboard. "Buy/Sell" appear strictly as data labels — there are no trade
-  actions, no overlays, and nothing that clicks, types or guides input in
-  the game client.
+  **Refresh**, **Open Wiki** (external browser) and **Copy name** to the
+  system clipboard. "Buy/Sell" appear strictly as data labels — there are no
+  trade actions, no overlays, and nothing that clicks, types or guides input
+  in the game client. (The old Copy price / Copy qty buttons were removed in
+  v0.8.10: the game accepts no paste, so they assisted nothing.)
+- **Primary GE suggestion (v0.8.10, display-only).** The **#1** item of the
+  Fast Flip list is always marked as the single primary suggestion for your
+  next manual GE search — a gold border plus a compact **"GE suggestion"**
+  chip, Flipping-Copilot style. #2/#3 stay informational and cannot be
+  selected as the suggestion. The chip is not a button: RuneLite exposes no
+  safe API to prepare the in-game GE search (see Compliance below), so you
+  read the chip and type the search yourself.
 - **Context-aware GE panel (v0.8.4, focused in v0.8.5, display-only).** When you
   open an item in the Grand Exchange Buy/Sell setup, the panel shows *that
   item's* RuneFlip context: Wiki **low/high** legs, safe/quick/recommended
@@ -128,6 +136,15 @@ field, and a build-time `ComplianceScanTest` fails if any game-acting API
 (`setVarcStrValue`/`runScript`/`invokeMenuAction`/`KeyEvent`/`Robot`/
 screenshot/…) ever appears in the plugin source.
 
+**Primary GE Search Assist blocked — no safe API found (v0.8.10).** The
+primary "GE suggestion" chip is deliberately display-only. The v0.8.10
+investigation re-confirmed that every route to surface the #1 item inside
+the in-game GE search — setting the "previous search" item, preparing the
+search chatbox, or injecting a result — requires `setVarcStrValue` +
+`runScript`, widget mutation or synthetic input, all forbidden by this
+contract and rejected at build time by `ComplianceScanTest`. No write path
+exists; the plugin never sets a price or quantity either.
+
 ## Build
 
 Requires JDK 11+.
@@ -162,15 +179,26 @@ install only a jar you built (or trust). The default **Backend URL**
 (`https://runeflip-api.onrender.com/api`) points at the public RuneFlip
 service; point it at your own backend if you self-host.
 
-> **v0.8.10** (2026-07): responsiveness — the panel now reacts instantly.
-> Strategy pills highlight optimistically on click (with an "Updating…"
-> indicator until the response renders), stale responses are dropped so rapid
-> clicks render only the last strategy, short in-memory caches (20s) make
-> pill toggles and item re-selections instant, and opening a GE item shows
-> "Loading item context…" immediately while the fetch runs in the background.
-> Display timing only — no fetch semantics, strategy logic or compliance
-> change. `gradlew clean test build` green (128 tests, incl.
-> `ComplianceScanTest`), jar emitted.
+> **v0.8.10** (2026-07): primary GE suggestion + Copy price/qty removal +
+> responsiveness (this release supersedes the earlier v0.8.10 preview tag,
+> which carried the responsiveness work alone).
+> The **#1** Fast Flip row is now always the single **primary GE
+> suggestion** — gold border + "GE suggestion" chip — for your next manual
+> GE search; #2/#3 stay informational. The chip is display-only: the
+> investigation concluded **Primary GE Search Assist blocked — no safe API
+> found** (every route needs `setVarcStrValue`+`runScript`/widget mutation/
+> synthetic input, all forbidden), so nothing is written into the game and
+> no price/quantity is ever set. The v0.8.3 clipboard **Copy price / Copy
+> qty buttons were removed everywhere** (the game accepts no paste, so they
+> assisted nothing in real play); Copy name and Open Wiki stay, and the
+> retired `enableAssistedOfferSetup` config key survives hidden, read by no
+> code. Also bundles the responsiveness work: strategy pills highlight
+> optimistically on click (with an "Updating…" indicator), stale responses
+> are dropped so rapid clicks render only the last strategy, short
+> in-memory caches (20s) make pill toggles and item re-selections instant,
+> and opening a GE item shows "Loading item context…" immediately.
+> `gradlew clean test build` green (incl. `ComplianceScanTest` and the new
+> `PrimaryGeSuggestionTest`), jar emitted.
 >
 > **v0.8.9** (2026-07): header hotfix — in the narrow sidebar, "Connected" and
 > "Refresh" overlapped the "RuneFlip v0.8.8" wordmark. The header now stacks

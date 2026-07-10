@@ -5,10 +5,11 @@ import org.junit.Test;
 import static org.junit.Assert.assertFalse;
 
 /**
- * Assisted Offer Setup (v0.8.3) must be strictly opt-in: the config default
- * is OFF, so a fresh install never shows the clipboard Copy buttons until the
- * user turns it on. Uses the interface default method directly (config
- * defaults are plain Java defaults, no RuneLite runtime needed).
+ * Assisted Offer Setup was retired in v0.8.10 (the Copy buttons it gated are
+ * gone — the game accepts no paste), but the config key survives for saved-
+ * config compatibility and must keep its OFF default. The flag is read by no
+ * code (asserted in {@link PrimaryGeSuggestionTest}); this pins the default
+ * so a leftover key can never look like an active feature.
  */
 public class AssistedOfferSetupConfigTest
 {

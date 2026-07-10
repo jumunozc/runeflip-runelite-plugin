@@ -357,7 +357,6 @@ public class RuneFlipCompanionPlugin extends Plugin
 		}
 		String url = config.backendUrl();
 		String clientId = ensureClientId();
-		boolean assistedSetup = config.enableAssistedOfferSetup();
 
 		// Fresh cache (v0.8.10): re-opening the same item re-renders instantly.
 		String memoBase = prefsQueryMemo != null ? prefsQueryMemo : "";
@@ -367,7 +366,7 @@ public class RuneFlipCompanionPlugin extends Plugin
 		if (cached != null)
 		{
 			SwingUtilities.invokeLater(
-				() -> respectSelection(itemId, target, cached, assistedSetup));
+				() -> respectSelection(itemId, target, cached));
 			return;
 		}
 
@@ -389,7 +388,7 @@ public class RuneFlipCompanionPlugin extends Plugin
 					itemContextCache.put(itemContextKey(itemId, query), res,
 						System.currentTimeMillis());
 					SwingUtilities.invokeLater(
-						() -> respectSelection(itemId, target, res, assistedSetup));
+						() -> respectSelection(itemId, target, res));
 				},
 				() ->
 				{
@@ -443,12 +442,11 @@ public class RuneFlipCompanionPlugin extends Plugin
 	private void respectSelection(
 		int itemId,
 		RuneFlipPanel target,
-		RuneFlipData.FastFlipItemContextResponse res,
-		boolean assistedSetup)
+		RuneFlipData.FastFlipItemContextResponse res)
 	{
 		if (lastSelectedGeItem == itemId)
 		{
-			target.updateSelectedItem(res, assistedSetup);
+			target.updateSelectedItem(res);
 		}
 	}
 
@@ -751,9 +749,6 @@ public class RuneFlipCompanionPlugin extends Plugin
 		// client id is forwarded (v0.8.2 opt-in) so recommended actions know
 		// about this install's existing GE offers. Display only — the response
 		// is rendered verbatim, never acted on.
-		// Assisted Offer Setup opt-in (v0.8.3): read once per refresh and
-		// passed to the panel so its clipboard-only Copy buttons reflect the
-		// current config. OFF by default — display-only otherwise.
 		// SessionPanel KPIs (v0.8.7): refresh alongside the reads so the
 		// session time stays current even without new offer events.
 		pushSessionStats();
@@ -761,9 +756,8 @@ public class RuneFlipCompanionPlugin extends Plugin
 		// The StrategyPill's local override (v0.8.7) is applied on top of the
 		// saved preferences — served from the 30s memo when fresh (v0.8.10),
 		// and the default strategy applies when the prefs fetch fails.
-		boolean assistedSetup = config.enableAssistedOfferSetup();
 		withBaseQuery(url, clientId, base ->
-			loadFastFlip(url, overriddenQuery(base), clientId, assistedSetup, target));
+			loadFastFlip(url, overriddenQuery(base), clientId, target));
 
 		apiClient.fetchCompletedAlerts(url, clientId,
 			response -> SwingUtilities.invokeLater(() -> target.updateCompleted(response)),
@@ -795,7 +789,6 @@ public class RuneFlipCompanionPlugin extends Plugin
 		String url,
 		String strategyQuery,
 		String clientId,
-		boolean assistedSetup,
 		RuneFlipPanel target)
 	{
 		// Fresh cache (v0.8.10): pill toggles within the TTL re-render at once
@@ -805,7 +798,7 @@ public class RuneFlipCompanionPlugin extends Plugin
 		if (cached != null)
 		{
 			SwingUtilities.invokeLater(
-				() -> target.updateFastFlip(cached, assistedSetup));
+				() -> target.updateFastFlip(cached));
 			return;
 		}
 
@@ -841,7 +834,7 @@ public class RuneFlipCompanionPlugin extends Plugin
 							overviewCache.put("", fallback,
 								System.currentTimeMillis());
 							SwingUtilities.invokeLater(() ->
-								target.updateFastFlip(fallback, assistedSetup, true));
+								target.updateFastFlip(fallback, true));
 						},
 						() ->
 						{
@@ -850,12 +843,12 @@ public class RuneFlipCompanionPlugin extends Plugin
 								return;
 							}
 							SwingUtilities.invokeLater(() ->
-								target.updateFastFlip(response, assistedSetup, false));
+								target.updateFastFlip(response, false));
 						});
 					return;
 				}
 				SwingUtilities.invokeLater(
-					() -> target.updateFastFlip(response, assistedSetup));
+					() -> target.updateFastFlip(response));
 			},
 			() ->
 			{
@@ -872,7 +865,7 @@ public class RuneFlipCompanionPlugin extends Plugin
 					strategyQuery == null || strategyQuery.isEmpty()
 						? "default" : strategyQuery);
 				SwingUtilities.invokeLater(
-					() -> target.updateFastFlip(null, assistedSetup));
+					() -> target.updateFastFlip(null));
 			});
 	}
 
@@ -890,9 +883,8 @@ public class RuneFlipCompanionPlugin extends Plugin
 		}
 		String url = config.backendUrl();
 		String clientId = ensureClientId();
-		boolean assistedSetup = config.enableAssistedOfferSetup();
 		withBaseQuery(url, clientId, base ->
-			loadFastFlip(url, overriddenQuery(base), clientId, assistedSetup, target));
+			loadFastFlip(url, overriddenQuery(base), clientId, target));
 	}
 
 	/**

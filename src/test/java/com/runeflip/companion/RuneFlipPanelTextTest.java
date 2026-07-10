@@ -140,8 +140,8 @@ public class RuneFlipPanelTextTest
 		assertEquals("Review manually.", RuneFlipPanel.SHORT_DISCLAIMER);
 	}
 
-	/** The header's version label must match the built artifact (v0.8.9 —
-	 *  there is no Swing render infra, so the version pin is the header test). */
+	/** The header's version label must match the built artifact (there is no
+	 *  Swing render infra, so the version pin is the header test). */
 	@Test
 	public void headerVersionMatchesTheGradleVersion() throws java.io.IOException
 	{
@@ -221,71 +221,6 @@ public class RuneFlipPanelTextTest
 		assertEquals("#e26a5e", RuneFlipPanel.actionColorHex("AVOID"));
 		assertEquals("#878d9c", RuneFlipPanel.actionColorHex(null));
 		assertEquals("#878d9c", RuneFlipPanel.actionColorHex("BANANA"));
-	}
-
-	// ── Assisted Offer Setup (v0.8.3) — opt-in gating ────────────────────────
-
-	private static RuneFlipData.RecommendedAction buyNew(Long price, Long qty)
-	{
-		RuneFlipData.RecommendedAction a = new RuneFlipData.RecommendedAction();
-		a.actionType = "BUY_NEW";
-		a.actionLabel = "Buy new";
-		a.reviewOnly = Boolean.TRUE;
-		a.targetPrice = price;
-		a.targetQuantity = qty;
-		return a;
-	}
-
-	@Test
-	public void assistedSetupHiddenUnlessOptedIn()
-	{
-		RuneFlipData.RecommendedAction action = buyNew(96L, 1000L);
-		// Config OFF (the default): buttons never show, even with a target.
-		assertFalse(RuneFlipPanel.showAssistedSetup(action, false));
-		// Config ON + a concrete target price: buttons show.
-		assertTrue(RuneFlipPanel.showAssistedSetup(action, true));
-	}
-
-	@Test
-	public void assistedSetupHiddenWhenNoTargetOrNoAction()
-	{
-		// HOLD / ABORT / AVOID carry no target price → no buttons even when ON.
-		RuneFlipData.RecommendedAction hold = new RuneFlipData.RecommendedAction();
-		hold.actionType = "HOLD";
-		hold.reviewOnly = Boolean.TRUE;
-		hold.targetPrice = null;
-		assertFalse(RuneFlipPanel.showAssistedSetup(hold, true));
-		// No action at all (pre-0.8.2 backend) → nothing to set up.
-		assertFalse(RuneFlipPanel.showAssistedSetup(null, true));
-	}
-
-	@Test
-	public void assistedSetupRequiresReviewOnlyInvariant()
-	{
-		// Defensive: an action that is somehow not reviewOnly must never get
-		// setup buttons (the compliance invariant is the gate).
-		RuneFlipData.RecommendedAction notReview = buyNew(96L, 1000L);
-		notReview.reviewOnly = Boolean.FALSE;
-		assertFalse(RuneFlipPanel.showAssistedSetup(notReview, true));
-		notReview.reviewOnly = null;
-		assertFalse(RuneFlipPanel.showAssistedSetup(notReview, true));
-	}
-
-	@Test
-	public void copyQuantityOnlyWhenTargetQuantityPresent()
-	{
-		assertTrue(RuneFlipPanel.showCopyQuantity(buyNew(96L, 1000L)));
-		// Price Edge actions carry a price but no quantity → no Copy qty.
-		assertFalse(RuneFlipPanel.showCopyQuantity(buyNew(96L, null)));
-		assertFalse(RuneFlipPanel.showCopyQuantity(null));
-	}
-
-	@Test
-	public void assistedSetupNoteStatesPrepareOnly()
-	{
-		// The compliance copy must say values are prepared, not executed.
-		assertTrue(RuneFlipPanel.ASSISTED_SETUP_NOTE.contains("prepares values only"));
-		assertTrue(RuneFlipPanel.ASSISTED_SETUP_NOTE.contains("review and confirm"));
 	}
 
 	@Test

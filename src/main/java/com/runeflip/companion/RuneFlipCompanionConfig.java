@@ -96,18 +96,19 @@ public interface RuneFlipCompanionConfig extends Config
 	}
 
 	/**
-	 * Assisted Offer Setup (v0.8.3), OFF by default. When enabled, the Fast
-	 * Flip entries show clipboard-only "Copy target price" / "Copy qty"
-	 * buttons for recommended actions, so the player can paste the values
-	 * into the official GE interface themselves. It NEVER fills a field,
-	 * confirms, cancels, collects, or performs any input — RuneFlip may
-	 * assist input, but never execute intent. See
-	 * docs/anti-bot-compliance.md and docs/runelite-readonly-contract.md.
+	 * LEGACY (v0.8.3 → retired in v0.8.10). The clipboard-only Copy price/qty
+	 * buttons this flag used to gate were removed: the game client accepts no
+	 * paste, so in real play the buttons assisted nothing. The key is kept
+	 * (hidden) ONLY so existing installs' saved config does not break — the
+	 * value is read by nothing and turning it on revives no button. The
+	 * panel's assistance is now the display-only "GE suggestion" chip on the
+	 * #1 Fast Flip row. See docs/anti-bot-compliance.md.
 	 */
 	@ConfigItem(
 		keyName = "enableAssistedOfferSetup",
-		name = "Assisted offer setup",
-		description = "Show clipboard-only Copy price/quantity buttons on Fast Flip actions. Prepares values only — you always review and confirm every offer manually in the official client. Never fills, confirms, cancels or collects.",
+		name = "Assisted offer setup (retired)",
+		description = "Retired in v0.8.10: the clipboard Copy price/qty buttons were removed (the game accepts no paste). This setting no longer does anything and is kept only for config compatibility.",
+		hidden = true,
 		position = 9
 	)
 	default boolean enableAssistedOfferSetup()

@@ -105,6 +105,19 @@ public class ComplianceScanTest
 			panel.contains("synthetic input"));
 	}
 
+	@Test
+	public void primaryGeSearchAssistStaysBlockedAndDocumented() throws IOException
+	{
+		// v0.8.10: the primary GE suggestion is a display-only chip. The
+		// investigation's conclusion (previous-search / search-prepare /
+		// search-suggest all require setVarcStrValue + runScript / widget
+		// mutation / synthetic input) must stay documented at the chip, so
+		// nobody "finishes" the feature with a forbidden write path.
+		String panel = read("RuneFlipPanel.java");
+		assertTrue("the blocked conclusion must remain documented",
+			panel.contains("Primary GE Search Assist blocked — no safe API found"));
+	}
+
 	// ── helpers ──────────────────────────────────────────────────────────────
 
 	private static List<Path> mainSources() throws IOException
