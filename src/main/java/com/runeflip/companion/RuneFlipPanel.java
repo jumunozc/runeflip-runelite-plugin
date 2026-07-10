@@ -157,8 +157,9 @@ public class RuneFlipPanel extends PluginPanel
 		"No completed flips yet this session.";
 	/** Hard cap so one absurd name can never distort the narrow sidebar. */
 	private static final int MAX_NAME_CHARS = 40;
-	/** Shown in the header next to the wordmark (v0.8.7 design). */
-	static final String PLUGIN_VERSION = "0.8.8";
+	/** Shown in the header next to the wordmark (v0.8.7 design). Must match
+	 *  build.gradle's version — pinned by RuneFlipPanelTextTest. */
+	static final String PLUGIN_VERSION = "0.8.9";
 
 	/**
 	 * Pairing callbacks implemented by the plugin (v0.6.3). Both are
@@ -206,30 +207,44 @@ public class RuneFlipPanel extends PluginPanel
 		setBackground(PANEL_BG);
 		setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
 
-		// ── Header (design): RuneFlip + version left, status + refresh right ─
-		JPanel header = new JPanel(new BorderLayout());
+		// ── Header (design, hotfix v0.8.9): two rows on the header band so the
+		//    wordmark, status and Refresh never overlap in the ~225px sidebar.
+		//    Row 1: RuneFlip wordmark + discreet version.
+		//    Row 2: Connected/Stale/Offline status left, small Refresh right.
+		JPanel header = new JPanel();
+		header.setLayout(new BoxLayout(header, BoxLayout.Y_AXIS));
 		header.setOpaque(true);
 		header.setBackground(HEADER_BG);
 		header.setBorder(BorderFactory.createCompoundBorder(
 			BorderFactory.createMatteBorder(0, 0, 1, 0, CARD_BORDER),
 			BorderFactory.createEmptyBorder(5, 6, 5, 6)));
+
+		JPanel headerTitleRow = new JPanel(new BorderLayout());
+		headerTitleRow.setOpaque(false);
+		headerTitleRow.setAlignmentX(LEFT_ALIGNMENT);
 		JLabel title = new JLabel(html(
 			"<span style='color:#f0e6d2'><b>Rune</b></span>"
 				+ "<span style='color:#e3b75d'><b>Flip</b></span>"
 				+ " <span style='color:#5c6270'>v" + PLUGIN_VERSION + "</span>"));
 		title.setFont(FontManager.getRunescapeBoldFont());
-		header.add(title, BorderLayout.WEST);
+		headerTitleRow.add(title, BorderLayout.WEST);
+		headerTitleRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 20));
+		header.add(headerTitleRow);
+		header.add(Box.createVerticalStrut(3));
 
-		JPanel headerRight = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
-		headerRight.setOpaque(false);
+		JPanel headerStatusRow = new JPanel(new BorderLayout(6, 0));
+		headerStatusRow.setOpaque(false);
+		headerStatusRow.setAlignmentX(LEFT_ALIGNMENT);
 		statusLabel.setFont(FontManager.getRunescapeSmallFont());
 		statusLabel.setForeground(MUTED);
-		headerRight.add(statusLabel);
+		headerStatusRow.add(statusLabel, BorderLayout.WEST);
 		JButton refresh = smallButton("Refresh");
 		refresh.addActionListener(e -> onRefresh.run());
-		headerRight.add(refresh);
-		header.add(headerRight, BorderLayout.EAST);
-		header.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
+		headerStatusRow.add(refresh, BorderLayout.EAST);
+		headerStatusRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 22));
+		header.add(headerStatusRow);
+
+		header.setMaximumSize(new Dimension(Integer.MAX_VALUE, 52));
 		header.setAlignmentX(LEFT_ALIGNMENT);
 		add(header);
 		add(Box.createVerticalStrut(8));

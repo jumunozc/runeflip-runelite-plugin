@@ -140,6 +140,20 @@ public class RuneFlipPanelTextTest
 		assertEquals("Review manually.", RuneFlipPanel.SHORT_DISCLAIMER);
 	}
 
+	/** The header's version label must match the built artifact (v0.8.9 —
+	 *  there is no Swing render infra, so the version pin is the header test). */
+	@Test
+	public void headerVersionMatchesTheGradleVersion() throws java.io.IOException
+	{
+		String gradle = new String(
+			java.nio.file.Files.readAllBytes(
+				java.nio.file.Paths.get("build.gradle")),
+			java.nio.charset.StandardCharsets.UTF_8);
+		assertTrue("build.gradle must declare version '"
+				+ RuneFlipPanel.PLUGIN_VERSION + "'",
+			gradle.contains("version = '" + RuneFlipPanel.PLUGIN_VERSION + "'"));
+	}
+
 	@Test
 	public void strategySummaryRendersTheBackendDescriptionVerbatim()
 	{
