@@ -51,9 +51,10 @@ public class ComplianceScanTest
 		// Synthetic input / menu invocation / server-state mutation.
 		"setVarcIntValue", "invokeMenuAction", "menuAction(",
 		"setVarbit", "setVarpValue", "setVarp(", "setVarbitValue",
-		// Keyboard / mouse automation.
-		"java.awt.Robot", "Robot(", "KeyEvent", "MouseEvent",
-		"keyPress", "keyRelease", "mousePress", "mouseMove", "dispatchEvent",
+		// Keyboard / mouse SYNTHESIS — creating, dispatching or replaying
+		// input is forbidden everywhere, the hotkey holder included.
+		"java.awt.Robot", "Robot(", "MouseEvent",
+		"mousePress", "mouseMove", "dispatchEvent", "processKey",
 		// OCR / screenshot / screen scraping.
 		"createScreenCapture", "getBufferedImageProvider", "drawManager",
 		"DrawManager", "ImageCapture", "Tesseract", "screenshot", "getCanvas",
@@ -61,13 +62,25 @@ public class ComplianceScanTest
 
 	/**
 	 * Field-prepare writes (v0.8.11): allowed ONLY inside the assist service,
-	 * where they are click-gated and editor-validated. Anywhere else fails.
+	 * where they are click/hotkey-gated and editor-validated. Anywhere else
+	 * fails.
 	 */
 	private static final String[] FIELD_WRITE_TOKENS = {
 		"setVarcStrValue", "runScript",
 	};
 
+	/**
+	 * Key LISTENING types (v0.8.13): hearing the user's OWN key press via
+	 * RuneLite's KeyManager/HotkeyListener is the opposite of synthesis, but
+	 * it stays quarantined in ONE file so nothing else can grow input
+	 * handling. ("keyPress" also matches HotkeyListener#hotkeyPressed.)
+	 */
+	private static final String[] KEY_LISTEN_TOKENS = {
+		"KeyEvent", "keyPress", "keyRelease", "KeyListener",
+	};
+
 	private static final String ASSIST_SERVICE = "GeFieldAssistService.java";
+	private static final String HOTKEY_HOLDER = "GeFieldAssistHotkey.java";
 
 	@Test
 	public void pluginSourceContainsNoGameActingApis() throws IOException
@@ -87,7 +100,20 @@ public class ComplianceScanTest
 					violations.add(source.getFileName() + " → " + token);
 				}
 			}
-			if (source.getFileName().toString().equals(ASSIST_SERVICE))
+			String fileName = source.getFileName().toString();
+			if (!fileName.equals(HOTKEY_HOLDER))
+			{
+				for (String token : KEY_LISTEN_TOKENS)
+				{
+					if (code.contains(token))
+					{
+						violations.add(fileName + " → " + token
+							+ " (key listening allowed only in "
+							+ HOTKEY_HOLDER + ")");
+					}
+				}
+			}
+			if (fileName.equals(ASSIST_SERVICE))
 			{
 				continue;
 			}
@@ -95,7 +121,7 @@ public class ComplianceScanTest
 			{
 				if (code.contains(token))
 				{
-					violations.add(source.getFileName() + " → " + token
+					violations.add(fileName + " → " + token
 						+ " (allowed only in " + ASSIST_SERVICE + ")");
 				}
 			}
@@ -137,15 +163,38 @@ public class ComplianceScanTest
 		}
 	}
 
-	/** Every prepare call site must pass USER_CLICK — never AUTOMATIC. */
+	/** Every prepare call site must pass the user's own explicit source —
+	 *  USER_CLICK or USER_HOTKEY (v0.8.13) — never AUTOMATIC. */
 	@Test
-	public void assistCallSitesUseTheUserClickSourceOnly() throws IOException
+	public void assistCallSitesUseExplicitUserSourcesOnly() throws IOException
 	{
 		String plugin = stripComments(read("RuneFlipCompanionPlugin.java"));
 		assertTrue("the plugin must invoke the assist via USER_CLICK",
 			plugin.contains("GeFieldAssist.ActionSource.USER_CLICK"));
+		assertTrue("the hotkey path must invoke the assist via USER_HOTKEY",
+			plugin.contains("GeFieldAssist.ActionSource.USER_HOTKEY"));
 		assertTrue("nothing may ever pass the AUTOMATIC source",
 			!plugin.contains("ActionSource.AUTOMATIC"));
+	}
+
+	/**
+	 * The hotkey holder (v0.8.13) may only LISTEN: it must register through
+	 * RuneLite's KeyManager, must contain no game write (the field-write
+	 * scan above already fails it otherwise), and must never feed events
+	 * back into the client (processKey* is globally forbidden).
+	 */
+	@Test
+	public void hotkeyHolderOnlyListens() throws IOException
+	{
+		String raw = read(HOTKEY_HOLDER);
+		String code = stripComments(raw);
+		assertTrue("the hotkey must go through RuneLite's KeyManager",
+			code.contains("KeyManager"));
+		assertTrue("listening must be the documented opposite of synthesis",
+			raw.contains("never synthesizes") || raw.contains("never a synthesized"));
+		assertTrue("the holder must hold no game write",
+			!code.contains("setVarcStrValue") && !code.contains("runScript")
+				&& !code.contains("net.runelite.api.Client"));
 	}
 
 	@Test

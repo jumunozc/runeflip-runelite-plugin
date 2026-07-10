@@ -110,8 +110,34 @@ class GeFieldAssistService
 	}
 
 	// ── Read-only GE state checks (also used by the plugin to decide which
-	//    "RuneFlip: …" menu OPTION to display — displaying an option is not an
-	//    action; the write above still re-validates on the actual click) ─────
+	//    "RuneFlip: …" menu OPTION or chatbox HINT to display — displaying is
+	//    not an action; the write above still re-validates on the actual
+	//    click/hotkey) ──────────────────────────────────────────────────────
+
+	/**
+	 * Which GE editor is active right now (v0.8.13): the item search, the
+	 * qty/price chatbox editor (classified by its real prompt), or NONE.
+	 * An unknown prompt maps to NONE — no assist for an editor we cannot
+	 * positively identify.
+	 */
+	GeFieldAssist.Field activeField()
+	{
+		if (isItemSearchOpen())
+		{
+			return GeFieldAssist.Field.ITEM_SEARCH;
+		}
+		if (isValueEditorOpen())
+		{
+			GeFieldAssist.Field field =
+				GeFieldAssist.fieldForPrompt(chatboxPrompt());
+			// The value editor only edits qty/price; a search-looking prompt
+			// here would be a misread — stay honest and offer nothing.
+			return field == GeFieldAssist.Field.ITEM_SEARCH
+				? GeFieldAssist.Field.NONE
+				: field;
+		}
+		return GeFieldAssist.Field.NONE;
+	}
 
 	/** GE offer setup open AND the item-search chatbox is the active input. */
 	boolean isItemSearchOpen()

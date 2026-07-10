@@ -25,18 +25,25 @@ final class GeFieldAssist
 	{
 	}
 
-	/** How a prepare call was initiated. Only USER_CLICK may ever write. */
+	/** How a prepare call was initiated. Only the user's OWN explicit input
+	 *  (a click on a RuneFlip option/hint, or the assist hotkey pressed by
+	 *  the user) may ever write. */
 	enum ActionSource
 	{
-		/** The user explicitly clicked a "RuneFlip: …" option. */
+		/** The user explicitly clicked a "RuneFlip: …" option or hint. */
 		USER_CLICK,
+		/** The user pressed the configured assist hotkey (v0.8.13). Listened
+		 *  through RuneLite's KeyManager — the user's own physical key press,
+		 *  never a synthesized one. */
+		USER_HOTKEY,
 		/** Anything else — timers, events, background code. Always rejected. */
 		AUTOMATIC
 	}
 
-	/** Which GE chatbox editor a prompt belongs to. */
+	/** Which GE editor is active. */
 	enum Field
 	{
+		ITEM_SEARCH,
 		QUANTITY,
 		PRICE,
 		NONE
@@ -47,21 +54,25 @@ final class GeFieldAssist
 		"RuneFlip prepared the value. Review manually.";
 
 	/**
-	 * The single gate every prepare call passes: an explicit user click AND a
-	 * valid, currently-open GE editor. A background/automatic source or a
-	 * missing editor rejects the write — RuneFlip never acts without human
-	 * input and never writes into the wrong context.
+	 * The single gate every prepare call passes: the user's OWN explicit
+	 * input (click or hotkey) AND a valid, currently-open GE editor. A
+	 * background/automatic source or a missing editor rejects the write —
+	 * RuneFlip never acts without human input and never writes into the
+	 * wrong context.
 	 */
 	static boolean canPrepare(ActionSource source, boolean editorValid)
 	{
-		return source == ActionSource.USER_CLICK && editorValid;
+		return (source == ActionSource.USER_CLICK
+			|| source == ActionSource.USER_HOTKEY) && editorValid;
 	}
 
 	/**
-	 * Classifies the GE chatbox prompt ("How many do you wish to buy?" /
-	 * "Set a price for each item:") into the field being edited. Unknown or
-	 * missing prompts yield {@link Field#NONE} — no assist is offered for an
-	 * editor we cannot positively identify.
+	 * Classifies the GE chatbox prompt into the editor being shown. The real
+	 * prompts (v0.8.13): "What would you like to buy?" / "What would you like
+	 * to sell?" (item search), "Set a price for each item:" (price), "How
+	 * many do you wish to buy?" / "How many do you wish to sell?" (quantity).
+	 * Unknown or missing prompts yield {@link Field#NONE} — no assist is
+	 * offered for an editor we cannot positively identify.
 	 */
 	static Field fieldForPrompt(String chatboxTitle)
 	{
@@ -70,6 +81,10 @@ final class GeFieldAssist
 			return Field.NONE;
 		}
 		String title = chatboxTitle.toLowerCase();
+		if (title.contains("what would you like"))
+		{
+			return Field.ITEM_SEARCH;
+		}
 		if (title.contains("how many"))
 		{
 			return Field.QUANTITY;
@@ -187,5 +202,30 @@ final class GeFieldAssist
 	static String priceLabel(long price)
 	{
 		return "RuneFlip: set price " + String.format("%,d", price) + " gp";
+	}
+
+	// ── Chatbox hints (v0.8.13, Copilot-style visible assist) ────────────────
+
+	/** GE search hint: "RuneFlip item: Death rune" — always the #1 primary
+	 *  suggestion, never #2/#3. */
+	static String searchHint(String itemName)
+	{
+		return "RuneFlip item: " + RuneFlipPanel.sanitizeName(itemName);
+	}
+
+	/** Price editor hint: "Press [Right Brace] to set RuneFlip price: 1,049
+	 *  gp" — the key label comes from the user's configured hotkey. */
+	static String priceHint(long price, String keyLabel)
+	{
+		return "Press [" + keyLabel + "] to set RuneFlip price: "
+			+ String.format("%,d", price) + " gp";
+	}
+
+	/** Quantity editor hint: "Press [Right Brace] to set RuneFlip quantity:
+	 *  250". */
+	static String qtyHint(long qty, String keyLabel)
+	{
+		return "Press [" + keyLabel + "] to set RuneFlip quantity: "
+			+ String.format("%,d", qty);
 	}
 }

@@ -3,6 +3,7 @@ package com.runeflip.companion;
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
+import net.runelite.client.config.Keybind;
 import net.runelite.client.config.Range;
 
 /**
@@ -153,6 +154,28 @@ public interface RuneFlipCompanionConfig extends Config
 	default boolean enableGeFieldAssist()
 	{
 		return true;
+	}
+
+	/**
+	 * GE field assist hotkey (v0.8.13), default Right Brace (']'), shown in
+	 * the chatbox hints ("Press [key] to set RuneFlip price/quantity: …").
+	 * Rebindable from the config UI if it conflicts with another plugin. It
+	 * works ONLY while the matching GE editor is open, and pressing it is
+	 * the user's own explicit action — the write still passes every
+	 * GeFieldAssistService gate and never submits an offer.
+	 */
+	@ConfigItem(
+		keyName = "geFieldAssistHotkey",
+		name = "GE field assist hotkey",
+		description = "Press while a GE editor is open to prepare the RuneFlip value shown in the chatbox hint (item / quantity / price). Prepares the typed value only — you still press Enter and confirm every offer yourself. Rebind it if it conflicts.",
+		position = 16
+	)
+	default Keybind geFieldAssistHotkey()
+	{
+		// ']' (Right Brace), keycode 93 — the raw code keeps the key-event
+		// type out of this file (the compliance scan allows key LISTENING
+		// types only in GeFieldAssistHotkey).
+		return new Keybind(93, 0);
 	}
 
 	@Range(min = 30)

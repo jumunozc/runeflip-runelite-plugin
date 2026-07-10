@@ -34,11 +34,27 @@ public class GeFieldAssistTest
 		assertFalse(GeFieldAssist.canPrepare(null, true));
 	}
 
+	@Test
+	public void theUsersOwnHotkeyMayPrepareInAValidEditorOnly()
+	{
+		// v0.8.13: the user's own key press counts as explicit user action…
+		assertTrue(GeFieldAssist.canPrepare(
+			GeFieldAssist.ActionSource.USER_HOTKEY, true));
+		// …but never outside the matching GE editor.
+		assertFalse(GeFieldAssist.canPrepare(
+			GeFieldAssist.ActionSource.USER_HOTKEY, false));
+	}
+
 	// ── prompt classification (no assist for an unidentified editor) ────────
 
 	@Test
-	public void promptsClassifyIntoQuantityPriceOrNothing()
+	public void promptsClassifyIntoSearchQuantityPriceOrNothing()
 	{
+		// The real GE prompts (v0.8.13).
+		assertEquals(GeFieldAssist.Field.ITEM_SEARCH,
+			GeFieldAssist.fieldForPrompt("What would you like to buy?"));
+		assertEquals(GeFieldAssist.Field.ITEM_SEARCH,
+			GeFieldAssist.fieldForPrompt("What would you like to sell?"));
 		assertEquals(GeFieldAssist.Field.QUANTITY,
 			GeFieldAssist.fieldForPrompt("How many do you wish to buy?"));
 		assertEquals(GeFieldAssist.Field.QUANTITY,
@@ -52,6 +68,24 @@ public class GeFieldAssistTest
 		assertEquals(GeFieldAssist.Field.NONE,
 			GeFieldAssist.fieldForPrompt("Enter your name:"));
 		assertEquals(GeFieldAssist.Field.NONE, GeFieldAssist.fieldForPrompt(null));
+	}
+
+	// ── chatbox hint copy (v0.8.13, Copilot-style) ───────────────────────────
+
+	@Test
+	public void chatboxHintsNameTheItemAndTheHotkey()
+	{
+		assertEquals("RuneFlip item: Death rune",
+			GeFieldAssist.searchHint("Death rune"));
+
+		String price = GeFieldAssist.priceHint(106_026, "Right Brace");
+		assertTrue(price.startsWith("Press [Right Brace] to set RuneFlip price: 106"));
+		assertTrue(price.contains("026"));
+		assertTrue(price.endsWith(" gp"));
+
+		String qty = GeFieldAssist.qtyHint(1_883, "Right Brace");
+		assertTrue(qty.startsWith("Press [Right Brace] to set RuneFlip quantity: 1"));
+		assertTrue(qty.contains("883"));
 	}
 
 	// ── fixtures ─────────────────────────────────────────────────────────────

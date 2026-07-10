@@ -18,10 +18,12 @@ import net.runelite.api.InventoryID;
 import net.runelite.api.ItemContainer;
 import net.runelite.api.ItemID;
 import net.runelite.api.MenuAction;
+import net.runelite.api.events.GameTick;
 import net.runelite.api.events.GrandExchangeOfferChanged;
 import net.runelite.api.events.ItemContainerChanged;
 import net.runelite.api.events.MenuOpened;
 import net.runelite.api.events.VarbitChanged;
+import net.runelite.client.input.KeyManager;
 import java.awt.image.BufferedImage;
 import javax.swing.SwingUtilities;
 import net.runelite.client.callback.ClientThread;
@@ -110,6 +112,9 @@ public class RuneFlipCompanionPlugin extends Plugin
 	@Inject
 	private ClientToolbar clientToolbar;
 
+	@Inject
+	private KeyManager keyManager;
+
 	private RuneFlipPanel panel;
 	private NavigationButton navButton;
 	private RuneFlipApiClient apiClient;
@@ -158,6 +163,14 @@ public class RuneFlipCompanionPlugin extends Plugin
 	/** Context of the item currently open in the GE setup (when fetched),
 	 *  used to source qty/price for that exact item. */
 	private volatile RuneFlipData.FastFlipItemContextResponse lastItemContext;
+	/** Visible chatbox hint (v0.8.13): one display-only text line while a GE
+	 *  editor is open ("RuneFlip item: …" / "Press [key] to set …"). */
+	private GeChatboxHint chatboxHint;
+	/** The user's assist hotkey, listened via RuneLite's KeyManager (the
+	 *  user's OWN key press — never synthesized). */
+	private GeFieldAssistHotkey assistHotkey;
+	/** Last hint rendered (debug log + idempotent updates); null = none. */
+	private String lastHintText;
 
 	private final AtomicBoolean inFlight = new AtomicBoolean(false);
 	private final AtomicBoolean capitalInFlight = new AtomicBoolean(false);
@@ -206,6 +219,10 @@ public class RuneFlipCompanionPlugin extends Plugin
 		apiClient = new RuneFlipApiClient(okHttpClient, gson);
 		sessionTracker = new SessionTracker(System.currentTimeMillis());
 		fieldAssist = new GeFieldAssistService(client);
+		chatboxHint = new GeChatboxHint(client);
+		assistHotkey = new GeFieldAssistHotkey(
+			keyManager, () -> config.geFieldAssistHotkey(), this::onAssistHotkey);
+		assistHotkey.register();
 		if (config.panelEnabled())
 		{
 			panel = new RuneFlipPanel(
@@ -227,6 +244,12 @@ public class RuneFlipCompanionPlugin extends Plugin
 	protected void shutDown()
 	{
 		dirtyAtMs = 0;
+		if (assistHotkey != null)
+		{
+			assistHotkey.unregister();
+			assistHotkey = null;
+		}
+		chatboxHint = null;
 		if (navButton != null)
 		{
 			clientToolbar.removeNavigation(navButton);
@@ -457,6 +480,143 @@ public class RuneFlipCompanionPlugin extends Plugin
 			.setTarget("")
 			.setType(MenuAction.RUNELITE)
 			.onClick(entry -> onUserClick.run());
+	}
+
+	/**
+	 * Visible chatbox hint (v0.8.13, Copilot-style): while a GE editor is
+	 * open, one display-only text line inside the chatbox names the assist —
+	 * "RuneFlip item: …" on the search (always the #1 primary suggestion,
+	 * never #2/#3), "Press [key] to set RuneFlip price/quantity: …" on the
+	 * value editors. Rendering a hint is display, not an action: the value
+	 * is prepared only by the user's own click on the hint or the hotkey,
+	 * both landing in the gated {@link GeFieldAssistService}. Runs on the
+	 * game tick (client thread); unknown editors show nothing.
+	 */
+	@Subscribe
+	public void onGameTick(GameTick event)
+	{
+		updateChatboxHint();
+	}
+
+	private void updateChatboxHint()
+	{
+		GeChatboxHint hintView = chatboxHint;
+		GeFieldAssistService assist = fieldAssist;
+		if (hintView == null || assist == null)
+		{
+			return;
+		}
+		if (!config.enableGeFieldAssist())
+		{
+			hintView.clear();
+			lastHintText = null;
+			return;
+		}
+
+		GeFieldAssist.Field field = assist.activeField();
+		String keyLabel = config.geFieldAssistHotkey().toString();
+		RuneFlipData.FastFlipItem primary = primaryFlip;
+		String text = null;
+		Runnable onClick = null;
+		if (field == GeFieldAssist.Field.ITEM_SEARCH
+			&& primary != null && primary.itemName != null)
+		{
+			String name = primary.itemName;
+			text = GeFieldAssist.searchHint(name);
+			onClick = () -> assist.prepareItemSearch(
+				name, GeFieldAssist.ActionSource.USER_CLICK);
+		}
+		else if (field == GeFieldAssist.Field.QUANTITY)
+		{
+			Long qty = GeFieldAssist.qtyFor(
+				lastSelectedGeItem, lastItemContext, primary);
+			if (qty != null)
+			{
+				long value = qty;
+				text = GeFieldAssist.qtyHint(value, keyLabel);
+				onClick = () -> assist.prepareQuantity(
+					value, GeFieldAssist.ActionSource.USER_CLICK);
+			}
+		}
+		else if (field == GeFieldAssist.Field.PRICE)
+		{
+			Long price = GeFieldAssist.priceFor(
+				lastSelectedGeItem, assist.isSellOffer(), lastItemContext, primary);
+			if (price != null)
+			{
+				long value = price;
+				text = GeFieldAssist.priceHint(value, keyLabel);
+				onClick = () -> assist.preparePrice(
+					value, GeFieldAssist.ActionSource.USER_CLICK);
+			}
+		}
+
+		if (text == null)
+		{
+			hintView.clear();
+			lastHintText = null;
+			return;
+		}
+		if (!text.equals(lastHintText))
+		{
+			// Safe diagnostic (v0.8.13): editor kind, open item id and the
+			// hint copy — never a token, never the client id.
+			log.debug("RuneFlip GE hint: editor={} item={} hint=\"{}\"",
+				field, lastSelectedGeItem, text);
+			lastHintText = text;
+		}
+		hintView.show(text, onClick);
+	}
+
+	/**
+	 * The GE field assist hotkey (v0.8.13) — fired by the USER's own key
+	 * press (listened via RuneLite's KeyManager in
+	 * {@link GeFieldAssistHotkey}; nothing is ever synthesized). Hops to the
+	 * client thread, resolves the ACTIVE editor at press time and prepares
+	 * the matching value through the gated service with USER_HOTKEY —
+	 * unknown editor or missing value means nothing happens. Never submits,
+	 * confirms, cancels or collects.
+	 */
+	private void onAssistHotkey()
+	{
+		clientThread.invoke(() ->
+		{
+			GeFieldAssistService assist = fieldAssist;
+			if (assist == null || !config.enableGeFieldAssist())
+			{
+				return;
+			}
+			GeFieldAssist.Field field = assist.activeField();
+			RuneFlipData.FastFlipItem primary = primaryFlip;
+			if (field == GeFieldAssist.Field.ITEM_SEARCH)
+			{
+				if (primary != null && primary.itemName != null)
+				{
+					assist.prepareItemSearch(primary.itemName,
+						GeFieldAssist.ActionSource.USER_HOTKEY);
+				}
+			}
+			else if (field == GeFieldAssist.Field.QUANTITY)
+			{
+				Long qty = GeFieldAssist.qtyFor(
+					lastSelectedGeItem, lastItemContext, primary);
+				if (qty != null)
+				{
+					assist.prepareQuantity(qty,
+						GeFieldAssist.ActionSource.USER_HOTKEY);
+				}
+			}
+			else if (field == GeFieldAssist.Field.PRICE)
+			{
+				Long price = GeFieldAssist.priceFor(lastSelectedGeItem,
+					assist.isSellOffer(), lastItemContext, primary);
+				if (price != null)
+				{
+					assist.preparePrice(price,
+						GeFieldAssist.ActionSource.USER_HOTKEY);
+				}
+			}
+		});
 	}
 
 	/**

@@ -39,17 +39,27 @@ or session data; never receives commands from the backend.
   your next GE search — a gold border plus a compact **"GE suggestion"**
   chip, Flipping-Copilot style. #2/#3 stay informational and cannot be
   selected as the suggestion.
-- **Explicit GE Field Assist (v0.8.11, click-gated).** New official rule:
-  **RuneFlip can prepare GE fields after explicit user action, but must
-  never submit or execute the offer.** While the matching GE editor is open,
-  right-clicking shows compact options — `RuneFlip: select <item>` (the #1
-  suggestion, in the item search), `RuneFlip: set qty <qty>` and
-  `RuneFlip: set price <price> gp` (for the item you have open; buy offers
-  get the buy target, sell offers the sell target). Clicking one prepares
-  the pending typed value — exactly as if you had typed it — and prints
-  *"RuneFlip prepared the value. Review manually."* You still press Enter,
-  still review, and still confirm every offer yourself. Toggle:
-  **GE field assist** (on by default; nothing happens without your click).
+- **Explicit GE Field Assist (v0.8.11, click-gated; visible since
+  v0.8.13).** Official rule: **RuneFlip can prepare GE fields after explicit
+  user action, but must never submit or execute the offer.** While the
+  matching GE editor is open you get, Copilot-style:
+  - a **visible chatbox hint** — `RuneFlip item: <item>` on the GE search
+    (always the #1 suggestion), `Press [<key>] to set RuneFlip price:
+    <price> gp` on the price editor (buy offers get the buy target, sell
+    offers the sell target) and `Press [<key>] to set RuneFlip quantity:
+    <qty>` on the quantity editor. The hint is clickable and only appears
+    on the real GE prompts — an unknown editor shows nothing;
+  - the **assist hotkey** (default **Right Brace `]`**, rebindable in the
+    config if it conflicts): press it while the editor is open and the
+    hinted value is prepared;
+  - the right-click `RuneFlip: select / set qty / set price` options.
+
+  All three prepare the pending typed value — exactly as if you had typed
+  it — and print *"RuneFlip prepared the value. Review manually."* You
+  still press Enter, still review, and still confirm every offer yourself.
+  Your own key press is **listened** through RuneLite's KeyManager, never
+  synthesized. Toggles: **GE field assist** (on) and **GE field assist
+  hotkey**.
 - **Context-aware GE panel (v0.8.4, focused in v0.8.5, display-only).** When you
   open an item in the Grand Exchange Buy/Sell setup, the panel shows *that
   item's* RuneFlip context: Wiki **low/high** legs, safe/quick/recommended
@@ -198,7 +208,7 @@ yourself**:
 
 1. Build the jar (see **Build** above): `./gradlew clean test build` produces
    `build/libs/runeflip-companion-<version>.jar` (currently
-   `runeflip-companion-0.8.12.jar`).
+   `runeflip-companion-0.8.13.jar`).
 2. Copy that jar into RuneLite's sideloaded-plugins folder:
    - Windows: `%USERPROFILE%\.runelite\sideloaded-plugins\`
    - macOS / Linux: `~/.runelite/sideloaded-plugins/`
@@ -210,6 +220,21 @@ install only a jar you built (or trust). The default **Backend URL**
 (`https://runeflip-api.onrender.com/api`) points at the public RuneFlip
 service; point it at your own backend if you self-host.
 
+> **v0.8.13** (2026-07): visible GE chatbox assist, Copilot-style. The field
+> assist now shows a **chatbox hint** while the matching GE editor is open —
+> `RuneFlip item: <item>` on the search (the #1 primary suggestion only),
+> `Press [<key>] to set RuneFlip price: <price> gp` / `…quantity: <qty>` on
+> the value editors — detected from the real prompts ("What would you like
+> to buy/sell?", "Set a price for each item:", "How many do you wish to
+> buy/sell?"); unknown prompts show nothing. New **GE field assist hotkey**
+> (default Right Brace `]`, rebindable): pressed with the editor open it
+> prepares the hinted value (`USER_HOTKEY` — your own key press, listened
+> via RuneLite's KeyManager and quarantined in one file; RuneFlip never
+> synthesizes input). The hint is also clickable. Write path unchanged:
+> prepare-only, `GeFieldAssistService`, never submits/confirms/cancels.
+> `gradlew clean test build` green (incl. the extended `ComplianceScanTest`),
+> jar emitted.
+>
 > **v0.8.12** (2026-07): sell-context retention — **RuneFlip keeps sell
 > context after a buy so the player can close flips manually.** In real play
 > the panel dropped to *"No RuneFlip target yet"* right after a buy filled
