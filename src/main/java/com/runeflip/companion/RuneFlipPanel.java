@@ -173,6 +173,15 @@ public class RuneFlipPanel extends PluginPanel
 	/** Selected-item loading state (v0.8.10): shown the instant a GE item is
 	 *  detected, while its context fetch runs in the background. */
 	static final String ITEM_LOADING_LINE = "Loading item context…";
+	/** Selected card fallback (v0.8.14): the context fetch failed with nothing
+	 *  cached — the SELECTION IS KEPT and says so; never a silent fall back
+	 *  to the Top 3. */
+	static final String ITEM_UNAVAILABLE_LINE =
+		"Could not load RuneFlip context. Keeping your selection — Refresh to retry.";
+	/** Discreet stale note (v0.8.14): the live refresh failed; the retained
+	 *  context stays on screen instead of being wiped. */
+	static final String STALE_CONTEXT_NOTE =
+		"Live refresh failed — showing the last RuneFlip context.";
 	/** Small in-flight indicator next to the Top-3 header (v0.8.10): shown
 	 *  from a pill click until the matching response renders — stale rows are
 	 *  never mistaken for the new strategy, and "no matches" never shows for a
@@ -182,7 +191,7 @@ public class RuneFlipPanel extends PluginPanel
 	private static final int MAX_NAME_CHARS = 40;
 	/** Shown in the header next to the wordmark (v0.8.7 design). Must match
 	 *  build.gradle's version — pinned by RuneFlipPanelTextTest. */
-	static final String PLUGIN_VERSION = "0.8.13";
+	static final String PLUGIN_VERSION = "0.8.14";
 
 	/**
 	 * Pairing callbacks implemented by the plugin (v0.6.3). Both are
@@ -595,6 +604,44 @@ public class RuneFlipPanel extends PluginPanel
 		loading.setAlignmentX(LEFT_ALIGNMENT);
 		selectedCard.add(loading);
 		applyVisibility();
+	}
+
+	/**
+	 * Selected-item UNAVAILABLE state (v0.8.14): the context fetch failed (and
+	 * its no-side compatibility retry too) with nothing cached to show. The
+	 * selection is KEPT — the card says so instead of silently falling back
+	 * to the Top 3, which read as the panel "losing" the item.
+	 */
+	void showSelectedItemUnavailable()
+	{
+		selectedCard.removeAll();
+		this.hasSelection = true;
+		JLabel line = new JLabel(html(safe(ITEM_UNAVAILABLE_LINE)));
+		line.setFont(FontManager.getRunescapeSmallFont());
+		line.setForeground(ALERT);
+		line.setAlignmentX(LEFT_ALIGNMENT);
+		selectedCard.add(line);
+		applyVisibility();
+	}
+
+	/**
+	 * Appends one discreet amber notice to the visible selected card
+	 * (v0.8.14) — e.g. "live refresh failed, showing the last context" —
+	 * without rebuilding or discarding what is already rendered.
+	 */
+	void appendSelectedNotice(String notice)
+	{
+		if (!hasSelection || notice == null || notice.isEmpty())
+		{
+			return;
+		}
+		JLabel label = new JLabel(html(
+			"<span style='color:#e8a04a'>" + safe(notice) + "</span>"));
+		label.setFont(FontManager.getRunescapeSmallFont());
+		label.setAlignmentX(LEFT_ALIGNMENT);
+		selectedCard.add(label);
+		selectedCard.revalidate();
+		selectedCard.repaint();
 	}
 
 	/**

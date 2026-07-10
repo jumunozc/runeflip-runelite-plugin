@@ -208,7 +208,7 @@ yourself**:
 
 1. Build the jar (see **Build** above): `./gradlew clean test build` produces
    `build/libs/runeflip-companion-<version>.jar` (currently
-   `runeflip-companion-0.8.13.jar`).
+   `runeflip-companion-0.8.14.jar`).
 2. Copy that jar into RuneLite's sideloaded-plugins folder:
    - Windows: `%USERPROFILE%\.runelite\sideloaded-plugins\`
    - macOS / Linux: `~/.runelite/sideloaded-plugins/`
@@ -220,6 +220,23 @@ install only a jar you built (or trust). The default **Backend URL**
 (`https://runeflip-api.onrender.com/api`) points at the public RuneFlip
 service; point it at your own backend if you self-host.
 
+> **v0.8.14** (2026-07): selected-item stability hotfix. Selecting a GE item
+> no longer flashes the loading card and falls back to the Top 3. Fixes:
+> (1) against a pre-v0.8.12 backend (which rejects the new `side` query
+> param with 400) the plugin now retries the context fetch **without** the
+> side param, and a failed fetch **never clears the selection** — it keeps
+> the retained card with *"Live refresh failed — showing the last RuneFlip
+> context."* or shows *"Could not load RuneFlip context. Keeping your
+> selection — Refresh to retry."*; (2) the selection var's brief -1 flicker
+> during buy↔sell/search transitions now arms an ~800 ms **grace period**
+> (re-checked on the client thread) instead of clearing instantly — a valid
+> item always wins over the Top 3, and overview responses can never stomp
+> the selected view. Safe debug logs trace selection/fetch/grace (no token,
+> no client id). Note: the public backend still needs the v0.8.12 API
+> deploy for the fully sell-focused answer; until then the plugin degrades
+> to the compatibility response. `gradlew clean test build` green (incl.
+> `SelectedItemStabilityTest`), jar emitted.
+>
 > **v0.8.13** (2026-07): visible GE chatbox assist, Copilot-style. The field
 > assist now shows a **chatbox hint** while the matching GE editor is open —
 > `RuneFlip item: <item>` on the search (the #1 primary suggestion only),

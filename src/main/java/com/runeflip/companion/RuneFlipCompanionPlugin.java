@@ -152,6 +152,9 @@ public class RuneFlipCompanionPlugin extends Plugin
 	 *  losing the targets. Local display bookkeeping only. */
 	private final FlipContextCache flipContextCache =
 		new FlipContextCache(FlipContextCache.DEFAULT_TTL_MS);
+	/** Pending fall-back-to-Top-3 deadline (v0.8.14), 0 = none. Armed when
+	 *  the selection var reads empty; cancelled by any valid read. */
+	private volatile long selectionClearDueMs;
 
 	// ── Explicit GE Field Assist (v0.8.11) ──────────────────────────────────
 	/** The ONLY writer of GE input fields; every write is click-gated and
@@ -377,11 +380,35 @@ public class RuneFlipCompanionPlugin extends Plugin
 			client.getVarpValue(GeItemSelection.GE_CURRENT_ITEM_VARP));
 		String side = GeItemSelection.sideOf(
 			client.getVarbitValue(net.runelite.api.Varbits.GE_OFFER_CREATION_TYPE));
+
+		// Selected-item stability (v0.8.14): the var briefly drops to -1 while
+		// the client transitions buy↔sell or through the search. An empty read
+		// no longer clears the card — it arms a short grace period; only a
+		// selection STILL empty after it falls back to the Top 3.
+		long now = System.currentTimeMillis();
+		selectionClearDueMs =
+			SelectedItemStability.clearDueAfter(current, now, selectionClearDueMs);
+		if (current <= 0)
+		{
+			if (lastSelectedGeItem > 0 && selectionClearDueMs != 0)
+			{
+				log.debug("RuneFlip selection: item {} -> empty, grace armed "
+						+ "({} ms); keeping the selected card",
+					lastSelectedGeItem, SelectedItemStability.GRACE_MS);
+				executor.schedule(this::maybeClearSelection,
+					SelectedItemStability.GRACE_MS + 100,
+					java.util.concurrent.TimeUnit.MILLISECONDS);
+			}
+			return;
+		}
+
 		if (current == lastSelectedGeItem && side.equals(lastSelectedSide))
 		{
 			return;
 		}
 		boolean itemChanged = current != lastSelectedGeItem;
+		log.debug("RuneFlip selection: item {} -> {} side {} -> {}",
+			lastSelectedGeItem, current, lastSelectedSide, side);
 		lastSelectedGeItem = current;
 		lastSelectedSide = side;
 		if (itemChanged)
@@ -391,15 +418,36 @@ public class RuneFlipCompanionPlugin extends Plugin
 			// change of the SAME item keeps it: same item, still valid.
 			lastItemContext = null;
 		}
-		RuneFlipPanel target = panel;
-		if (current > 0)
+		fetchItemContext(current, side);
+	}
+
+	/**
+	 * Runs after the grace period (v0.8.14): re-reads the selection on the
+	 * client thread and clears the card ONLY when it is still empty — a
+	 * reopened setup within the grace keeps everything untouched.
+	 */
+	private void maybeClearSelection()
+	{
+		clientThread.invoke(() ->
 		{
-			fetchItemContext(current, side);
-		}
-		else if (target != null)
-		{
-			SwingUtilities.invokeLater(target::clearSelectedItem);
-		}
+			int current = GeItemSelection.selectedItemId(
+				client.getVarpValue(GeItemSelection.GE_CURRENT_ITEM_VARP));
+			long now = System.currentTimeMillis();
+			if (!SelectedItemStability.shouldClear(current, now, selectionClearDueMs))
+			{
+				return;
+			}
+			log.debug("RuneFlip selection: still empty after grace — "
+				+ "returning to the Top 3");
+			selectionClearDueMs = 0;
+			lastSelectedGeItem = -1;
+			lastItemContext = null;
+			RuneFlipPanel target = panel;
+			if (target != null)
+			{
+				SwingUtilities.invokeLater(target::clearSelectedItem);
+			}
+		});
 	}
 
 	/**
@@ -645,6 +693,8 @@ public class RuneFlipCompanionPlugin extends Plugin
 			itemContextKey(itemId, memoQuery), System.currentTimeMillis());
 		if (cached != null)
 		{
+			log.debug("RuneFlip item context: short-cache hit (item={} side={})",
+				itemId, side);
 			SwingUtilities.invokeLater(
 				() -> respectSelection(itemId, target, cached, side));
 			return;
@@ -656,6 +706,10 @@ public class RuneFlipCompanionPlugin extends Plugin
 		// Only with nothing retained does the card show the loading state.
 		RuneFlipData.FastFlipItemContextResponse retained =
 			flipContextCache.get(itemId, System.currentTimeMillis());
+		long ticket = itemContextSeq.begin();
+		log.debug("RuneFlip item context: fetch start (item={} side={} seq={} "
+				+ "source={})",
+			itemId, side, ticket, retained != null ? "retained-first" : "loading");
 		if (retained != null)
 		{
 			SwingUtilities.invokeLater(
@@ -665,7 +719,6 @@ public class RuneFlipCompanionPlugin extends Plugin
 		{
 			SwingUtilities.invokeLater(target::showSelectedItemLoading);
 		}
-		long ticket = itemContextSeq.begin();
 		withBaseQuery(url, clientId, base ->
 		{
 			String query = withSideParam(overriddenQuery(base), side);
@@ -676,6 +729,8 @@ public class RuneFlipCompanionPlugin extends Plugin
 					{
 						return;
 					}
+					log.debug("RuneFlip item context: fetched (item={} side={} "
+						+ "seq={} source=network)", itemId, side, ticket);
 					itemContextCache.put(itemContextKey(itemId, query), res,
 						System.currentTimeMillis());
 					SwingUtilities.invokeLater(
@@ -687,12 +742,61 @@ public class RuneFlipCompanionPlugin extends Plugin
 					{
 						return;
 					}
-					// A failed refresh never wipes a useful retained view —
-					// only clear when nothing was rendered for this item.
-					if (retained == null)
-					{
-						SwingUtilities.invokeLater(target::clearSelectedItem);
-					}
+					// Backend compatibility (v0.8.14): a pre-v0.8.12 backend
+					// REJECTS the side param (unknown query props are 400 by
+					// its global validation) — which used to clear the card
+					// back to the Top 3 on EVERY selection. Retry once
+					// without the side: the entry-focused answer still
+					// carries the price edge the sell view renders from.
+					String plainQuery = overriddenQuery(base);
+					log.debug("RuneFlip item context: side-aware fetch failed "
+							+ "(item={} side={} seq={}) — retrying without side",
+						itemId, side, ticket);
+					apiClient.fetchFastFlipItem(url, itemId, plainQuery, clientId,
+						res ->
+						{
+							if (!itemContextSeq.isCurrent(ticket))
+							{
+								return;
+							}
+							log.debug("RuneFlip item context: fetched (item={} "
+									+ "side={} seq={} source=no-side-compat)",
+								itemId, side, ticket);
+							itemContextCache.put(itemContextKey(itemId, query),
+								res, System.currentTimeMillis());
+							SwingUtilities.invokeLater(
+								() -> respectSelection(itemId, target, res, side));
+						},
+						() ->
+						{
+							if (!itemContextSeq.isCurrent(ticket))
+							{
+								return;
+							}
+							// Both fetches failed: NEVER fall back to the
+							// Top 3. Keep the retained card with a discreet
+							// note, or say the context is unavailable.
+							log.debug("RuneFlip item context: both fetches "
+									+ "failed (item={} seq={}) — keeping "
+									+ "selection ({})", itemId, ticket,
+								retained != null ? "retained" : "unavailable card");
+							SwingUtilities.invokeLater(() ->
+							{
+								if (lastSelectedGeItem != itemId)
+								{
+									return;
+								}
+								if (retained != null)
+								{
+									target.appendSelectedNotice(
+										RuneFlipPanel.STALE_CONTEXT_NOTE);
+								}
+								else
+								{
+									target.showSelectedItemUnavailable();
+								}
+							});
+						});
 				});
 		});
 	}
