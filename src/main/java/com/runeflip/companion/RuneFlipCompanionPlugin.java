@@ -596,9 +596,25 @@ public class RuneFlipCompanionPlugin extends Plugin
 				value, GeFieldAssist.ActionSource.USER_CLICK);
 		}
 
-		GeChatboxHint.Result result = text == null
-			? hintView.clear()
-			: hintView.show(text, onClick);
+		GeChatboxHint.Result result;
+		if (text == null)
+		{
+			result = hintView.clear();
+		}
+		else if (field == GeFieldAssist.Field.ITEM_SEARCH)
+		{
+			// Own icon+text row in the results area (v0.8.16) — only while
+			// the search is still empty; once the user types, real results
+			// own that space and the hint must never overlap them.
+			result = assist.isSearchInputEmpty()
+				? hintView.showSearchRow(text, primary.itemId,
+					assist.isNativeLastSearchShowing(), onClick)
+				: hintView.clear();
+		}
+		else
+		{
+			result = hintView.showValueLine(text, onClick);
+		}
 
 		// Safe diagnostic (v0.8.14): editor kind, open item id, the #1
 		// primary (id + name), the hint copy, the render result and the

@@ -6,6 +6,8 @@ import net.runelite.api.ScriptID;
 import net.runelite.api.VarClientInt;
 import net.runelite.api.VarClientStr;
 import net.runelite.api.Varbits;
+import net.runelite.api.gameval.VarPlayerID;
+import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.vars.InputType;
 import net.runelite.api.widgets.ComponentID;
 import net.runelite.api.widgets.Widget;
@@ -155,6 +157,30 @@ class GeFieldAssistService
 		return results != null && !results.isHidden();
 	}
 
+	/**
+	 * Nothing typed into the open search yet (v0.8.16): the results area
+	 * still shows only the "Start typing…" helper, so the hint row has the
+	 * top slot to itself. Once the user types, real results own the area
+	 * and the hint must go. Read-only.
+	 */
+	boolean isSearchInputEmpty()
+	{
+		String pending = client.getVarcStrValue(VarClientStr.INPUT_TEXT);
+		return pending == null || pending.trim().isEmpty();
+	}
+
+	/**
+	 * The game's OWN "Last search:" row occupies the top slot of the
+	 * results area (the feature is enabled and a previous search exists) —
+	 * the hint row then renders one row height below it. Read-only varbit +
+	 * varp, the exact pair the game itself keys the row on.
+	 */
+	boolean isNativeLastSearchShowing()
+	{
+		return client.getVarbitValue(VarbitID.DISABLE_LAST_SEARCHED) == 0
+			&& client.getVarpValue(VarPlayerID.GE_LAST_SEARCHED) != -1;
+	}
+
 	/** GE offer setup open AND a chatbox value input (qty/price) is open. */
 	boolean isValueEditorOpen()
 	{
@@ -199,6 +225,8 @@ class GeFieldAssistService
 	{
 		return "offerSetup=" + isOfferSetupOpen()
 			+ " mesLayerMode=" + client.getVarcIntValue(VarClientInt.INPUT_TYPE)
+			+ " inputEmpty=" + isSearchInputEmpty()
+			+ " nativeLastSearch=" + isNativeLastSearchShowing()
 			+ " prompt=\"" + chatboxPrompt() + '"'
 			+ " container=" + describe(
 				client.getWidget(ComponentID.CHATBOX_CONTAINER))

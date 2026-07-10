@@ -5,32 +5,40 @@ import net.runelite.api.FontID;
 import net.runelite.api.widgets.ComponentID;
 import net.runelite.api.widgets.JavaScriptCallback;
 import net.runelite.api.widgets.Widget;
+import net.runelite.api.widgets.WidgetTextAlignment;
 import net.runelite.api.widgets.WidgetType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Visible GE chatbox hint (v0.8.13, Copilot-style; hardened in the v0.8.14
- * hotfix). Renders ONE display-only TEXT line inside the chatbox while a GE
- * editor is open — "RuneFlip item: …" on the search, "Press [key] to set
- * RuneFlip price/quantity: …" on the value editors — so the assist is
- * discoverable without right-clicking.
+ * Visible GE chatbox hint (v0.8.13; layout polished in v0.8.16 to the
+ * Flipping-Copilot look). Two layouts, both display-only:
  *
- * <p>v0.8.14 hardening — why the hint could stay invisible before:
  * <ul>
- *   <li><b>Stale child.</b> The GE search rebuilds the chatbox mes-layer,
- *       wiping dynamic children; the old reference still LOOKED alive (same
- *       text, not hidden), so the idempotency check skipped re-creating it.
- *       Attachment is now verified against the container's real child slot
- *       every update (each game tick), re-creating after any rebuild.</li>
- *   <li><b>One fixed container.</b> If the mes-layer container is missing or
- *       hidden, safe fallbacks are tried in order: the chatbox search-results
- *       layer, then the chatbox parent. All are standard overlay parents.</li>
- *   <li><b>Fixed bounds.</b> Position/size are now computed from the actual
- *       container so the line always lands inside its visible area.</li>
+ *   <li><b>Search row</b> — while the GE item search is open and still
+ *       EMPTY, one row renders at the top of the search-results area (the
+ *       slot the game's own "Last search:" row uses — below the "What would
+ *       you like to buy/sell?" prompt and the typed-input line, above the
+ *       "Start typing the name of an item…" helper): a small ITEM ICON on
+ *       the left and "RuneFlip item: …" left-aligned next to it. When the
+ *       native last-search row is showing, the hint sits one row height
+ *       BELOW it. Once the user types, real results own the area and the
+ *       hint is removed — it never overlaps them, the scrollbar or the
+ *       "Show last searched" checkbox (the row ends at the same right edge
+ *       as the native row content).</li>
+ *   <li><b>Value line</b> — on the qty/price editors, one left-aligned line
+ *       ("Press [key] to set RuneFlip price/quantity: …") on its OWN row
+ *       under the prompt, never over it (the proven Flipping-Copilot
+ *       geometry: x=10, y=40).</li>
  * </ul>
  *
- * <p>COMPLIANCE: this adds a purely presentational child widget to a chatbox
+ * <p>Rebuild-safe: attachment to the parent's real child slot is verified
+ * every game tick (the GE search rebuilds the chatbox and silently wipes
+ * dynamic children), and bounds are computed from the actual parent so the
+ * hint always lands inside the visible area. Closing the editor removes the
+ * hint.
+ *
+ * <p>COMPLIANCE: this adds purely presentational child widgets to a chatbox
  * layer (the standard overlay technique of Plugin Hub flipping tools). It
  * reads and mutates nothing of the game's own widgets, fires no script, and
  * performs no input. The hint may carry a click listener — a RuneLite
@@ -43,36 +51,56 @@ class GeChatboxHint
 {
 	private static final Logger log = LoggerFactory.getLogger(GeChatboxHint.class);
 
-	/** Dark gold — readable on the beige chatbox background. */
-	private static final int HINT_COLOR = 0x99_5C00;
-	/** Fallback line geometry when the container reports no size yet. */
-	static final int DEFAULT_WIDTH = 495;
-	static final int DEFAULT_Y = 55;
-	static final int LINE_HEIGHT = 16;
+	/** RuneFlip gold — readable on the dark search-results background. */
+	static final int SEARCH_TEXT_COLOR = 0xE3_B75D;
+	/** Dark gold — readable on the beige value-editor chatbox. */
+	static final int VALUE_TEXT_COLOR = 0x99_5C00;
+	/** Hover feedback on the clickable text (Copilot behavior). */
+	private static final int HOVER_COLOR = 0xFF_FFFF;
+
+	// ── search row geometry (mirrors the native "Last search:" row, the
+	//    same slot Flipping Copilot uses) ─────────────────────────────────────
+	/** Left edge of the row content — the native row's own indent. */
+	static final int SEARCH_ICON_X = 114;
+	static final int SEARCH_ICON_W = 36;
+	/** Row height — exactly one native previous-search row. */
+	static final int SEARCH_ROW_H = 32;
+	/** Text starts right of the icon (4px gap). */
+	static final int SEARCH_TEXT_X = SEARCH_ICON_X + SEARCH_ICON_W + 4;
+	/** Text width capped so the row ends at the native row's right edge —
+	 *  clear of the scrollbar and the "Show last searched" checkbox. */
+	static final int SEARCH_TEXT_W = 216;
+
+	// ── value-editor line geometry (proven Flipping-Copilot placement:
+	//    an own line under the prompt, never over it) ────────────────────────
+	static final int VALUE_LINE_X = 10;
+	static final int VALUE_LINE_Y = 40;
+	static final int VALUE_LINE_H = 16;
+	/** The native prompt ("How many…"/"Set a price…") renders above this
+	 *  band; the value line must start at or below it. */
+	static final int NATIVE_PROMPT_BAND_H = 36;
+	/** Fallback line width when the container reports no size yet. */
+	static final int DEFAULT_VALUE_WIDTH = 475;
+
+	private final Client client;
+	private Widget icon;
+	private Widget text;
+	/** Idempotency key: layout kind + text + position + item — anything
+	 *  else re-creates the widgets. */
+	private String stateKey;
 
 	/** What an update did — surfaced for the plugin's debug diagnostics. */
 	enum Result
 	{
-		/** A new hint child was created on a container. */
+		/** New hint widgets were created on a parent layer. */
 		SHOWN,
-		/** The existing child is still attached with the same text. */
+		/** The existing widgets are still attached with the same state. */
 		KEPT,
-		/** No visible container was available; nothing rendered. */
+		/** No visible parent layer was available; nothing rendered. */
 		NO_CONTAINER,
-		/** The hint was removed (editor closed / no text). */
+		/** The hint was removed (editor closed / typing / no text). */
 		CLEARED
 	}
-
-	/** Overlay parents, tried in order: the chatbox mes-layer container,
-	 *  the GE search-results layer, the chatbox parent. */
-	private static final int[] CONTAINER_CANDIDATES = {
-		ComponentID.CHATBOX_CONTAINER,
-		ComponentID.CHATBOX_GE_SEARCH_RESULTS,
-		ComponentID.CHATBOX_PARENT,
-	};
-
-	private final Client client;
-	private Widget hint;
 
 	GeChatboxHint(Client client)
 	{
@@ -80,116 +108,219 @@ class GeChatboxHint
 	}
 
 	/**
-	 * Shows (or refreshes) the hint line. Idempotent per game tick: when the
-	 * current child is still ATTACHED to its container with the same text,
-	 * nothing is touched; a chatbox rebuild (which discards dynamic
-	 * children) is detected via the container's child slot and the hint is
-	 * re-created.
+	 * Shows (or keeps) the search row: [item icon] "RuneFlip item: …",
+	 * left-aligned in the native previous-search slot of the results area.
+	 * {@code belowNativeRow} drops it one row height when the game's own
+	 * "Last search:" row occupies the top slot. An {@code itemId <= 0}
+	 * falls back to text-only at the same position. Idempotent per tick;
+	 * re-creates after any chatbox rebuild.
 	 */
-	Result show(String text, Runnable onUserClick)
+	Result showSearchRow(
+		String value, int itemId, boolean belowNativeRow, Runnable onUserClick)
 	{
-		if (text == null || text.isEmpty())
+		if (value == null || value.isEmpty())
 		{
 			return clear();
 		}
-		Widget container = findContainer();
-		if (container == null)
+		Widget parent = visible(ComponentID.CHATBOX_GE_SEARCH_RESULTS);
+		if (parent == null)
 		{
-			hint = null;
+			parent = visible(ComponentID.CHATBOX_CONTAINER);
+		}
+		if (parent == null)
+		{
+			forget();
 			return Result.NO_CONTAINER;
 		}
-		if (isAttached(container, hint) && text.equals(hint.getText()))
+		int y = searchRowY(belowNativeRow);
+		String key = "search|" + value + '|' + itemId + '|' + y
+			+ '|' + parent.getId();
+		if (key.equals(stateKey) && attached(parent, text)
+			&& (itemId <= 0 || attached(parent, icon)))
 		{
 			return Result.KEPT;
 		}
 		clear();
-		Widget child = container.createChild(-1, WidgetType.TEXT);
-		child.setText(text);
-		child.setTextColor(HINT_COLOR);
-		child.setFontId(FontID.VERDANA_11_BOLD);
-		child.setTextShadowed(false);
-		child.setOriginalX(0);
-		child.setOriginalY(hintY(container.getHeight()));
-		child.setOriginalWidth(hintWidth(container.getWidth()));
-		child.setOriginalHeight(LINE_HEIGHT);
-		child.setXTextAlignment(1); // centered, like the native prompts
-		if (onUserClick != null)
+		if (itemId > 0)
 		{
-			// User-click only: a widget-op callback on OUR OWN hint line.
-			child.setAction(0, "Use");
-			child.setHasListener(true);
-			child.setOnOpListener((JavaScriptCallback) ev -> onUserClick.run());
+			Widget ic = parent.createChild(-1, WidgetType.GRAPHIC);
+			ic.setItemId(itemId);
+			ic.setItemQuantity(1);
+			ic.setItemQuantityMode(0);
+			ic.setBorderType(1);
+			ic.setOriginalX(SEARCH_ICON_X);
+			ic.setOriginalY(y);
+			ic.setOriginalWidth(SEARCH_ICON_W);
+			ic.setOriginalHeight(SEARCH_ROW_H);
+			ic.revalidate();
+			icon = ic;
 		}
-		child.revalidate();
-		hint = child;
-		if (log.isDebugEnabled())
+		Widget t = parent.createChild(-1, WidgetType.TEXT);
+		t.setText(value);
+		t.setTextColor(SEARCH_TEXT_COLOR);
+		t.setFontId(FontID.VERDANA_11_BOLD);
+		t.setTextShadowed(true);
+		t.setOriginalX(itemId > 0 ? SEARCH_TEXT_X : SEARCH_ICON_X);
+		t.setOriginalY(y);
+		t.setOriginalWidth(SEARCH_TEXT_W);
+		t.setOriginalHeight(SEARCH_ROW_H);
+		t.setXTextAlignment(WidgetTextAlignment.LEFT);
+		t.setYTextAlignment(WidgetTextAlignment.CENTER);
+		makeClickable(t, onUserClick, SEARCH_TEXT_COLOR);
+		t.revalidate();
+		text = t;
+		stateKey = key;
+		logRendered("search row", parent, t);
+		return Result.SHOWN;
+	}
+
+	/**
+	 * Shows (or keeps) the value-editor line on its own left-aligned row
+	 * under the qty/price prompt. Idempotent per tick; re-creates after any
+	 * chatbox rebuild.
+	 */
+	Result showValueLine(String value, Runnable onUserClick)
+	{
+		if (value == null || value.isEmpty())
 		{
-			java.awt.Rectangle b = child.getBounds();
-			log.debug("RuneFlip GE hint rendered on {} (index {}) bounds={}",
-				container.getId(), child.getIndex(),
-				b == null ? "?" : b.x + "," + b.y + " " + b.width + "x" + b.height);
+			return clear();
 		}
+		Widget parent = visible(ComponentID.CHATBOX_CONTAINER);
+		if (parent == null)
+		{
+			parent = visible(ComponentID.CHATBOX_PARENT);
+		}
+		if (parent == null)
+		{
+			forget();
+			return Result.NO_CONTAINER;
+		}
+		int y = valueLineY(parent.getHeight());
+		String key = "value|" + value + '|' + y + '|' + parent.getId();
+		if (key.equals(stateKey) && attached(parent, text))
+		{
+			return Result.KEPT;
+		}
+		clear();
+		Widget t = parent.createChild(-1, WidgetType.TEXT);
+		t.setText(value);
+		t.setTextColor(VALUE_TEXT_COLOR);
+		t.setFontId(FontID.VERDANA_11_BOLD);
+		t.setTextShadowed(false);
+		t.setOriginalX(VALUE_LINE_X);
+		t.setOriginalY(y);
+		t.setOriginalWidth(valueLineWidth(parent.getWidth()));
+		t.setOriginalHeight(VALUE_LINE_H);
+		t.setXTextAlignment(WidgetTextAlignment.LEFT);
+		t.setYTextAlignment(WidgetTextAlignment.CENTER);
+		makeClickable(t, onUserClick, VALUE_TEXT_COLOR);
+		t.revalidate();
+		text = t;
+		stateKey = key;
+		logRendered("value line", parent, t);
 		return Result.SHOWN;
 	}
 
 	/** Hides the current hint (safe on stale/recycled references). */
 	Result clear()
 	{
-		if (hint != null)
+		if (icon != null)
 		{
-			hint.setHidden(true);
-			hint = null;
-			return Result.CLEARED;
+			icon.setHidden(true);
 		}
+		if (text != null)
+		{
+			text.setHidden(true);
+		}
+		forget();
 		return Result.CLEARED;
 	}
 
-	/** First candidate container that exists and is not hidden, or null. */
-	private Widget findContainer()
+	/** Drops references without touching widgets (parent gone/rebuilt). */
+	private void forget()
 	{
-		for (int componentId : CONTAINER_CANDIDATES)
-		{
-			Widget candidate = client.getWidget(componentId);
-			if (candidate != null && !candidate.isHidden())
-			{
-				return candidate;
-			}
-		}
-		return null;
+		icon = null;
+		text = null;
+		stateKey = null;
+	}
+
+	private Widget visible(int componentId)
+	{
+		Widget candidate = client.getWidget(componentId);
+		return candidate != null && !candidate.isHidden() ? candidate : null;
 	}
 
 	/**
-	 * Whether OUR child is still the one sitting in the container's dynamic
+	 * Whether OUR child is still the one sitting in the parent's dynamic
 	 * child slot. After the game rebuilds the chatbox, the slot is empty or
 	 * re-used by a different widget — the stale reference must not be
 	 * trusted, even when it still carries the old text and is not hidden.
 	 */
-	private static boolean isAttached(Widget container, Widget child)
+	private static boolean attached(Widget parent, Widget child)
 	{
 		return child != null && !child.isHidden()
-			&& container.getChild(child.getIndex()) == child;
+			&& parent.getChild(child.getIndex()) == child;
+	}
+
+	/** User-click only: a widget-op callback on OUR OWN hint text, plus the
+	 *  Copilot-style hover feedback that signals it is clickable. */
+	private static void makeClickable(
+		Widget widget, Runnable onUserClick, int restColor)
+	{
+		if (onUserClick == null)
+		{
+			return;
+		}
+		widget.setAction(0, "Use");
+		widget.setHasListener(true);
+		widget.setOnOpListener((JavaScriptCallback) ev -> onUserClick.run());
+		widget.setOnMouseRepeatListener(
+			(JavaScriptCallback) ev -> widget.setTextColor(HOVER_COLOR));
+		widget.setOnMouseLeaveListener(
+			(JavaScriptCallback) ev -> widget.setTextColor(restColor));
+	}
+
+	private static void logRendered(String kind, Widget parent, Widget t)
+	{
+		if (log.isDebugEnabled())
+		{
+			java.awt.Rectangle b = t.getBounds();
+			log.debug("RuneFlip GE hint {} rendered on {} (index {}) bounds={}",
+				kind, parent.getId(), t.getIndex(),
+				b == null ? "?" : b.x + "," + b.y + " " + b.width + "x" + b.height);
+		}
 	}
 
 	// ── pure geometry (unit-tested) ─────────────────────────────────────────
 
-	/** Line y inside the container: the classic under-the-prompt line when it
-	 *  fits, clamped onto the container's visible area when it would not. */
-	static int hintY(int containerHeight)
+	/** Search row y inside the results area: the top slot, or one native
+	 *  row height lower when the game's "Last search:" row is showing. */
+	static int searchRowY(boolean belowNativeRow)
+	{
+		return belowNativeRow ? SEARCH_ROW_H : 0;
+	}
+
+	/** Value line y: the own-line slot under the prompt when it fits,
+	 *  clamped onto the container's visible area when it would not. */
+	static int valueLineY(int containerHeight)
 	{
 		if (containerHeight <= 0)
 		{
-			return DEFAULT_Y;
+			return VALUE_LINE_Y;
 		}
-		if (DEFAULT_Y + LINE_HEIGHT <= containerHeight)
+		if (VALUE_LINE_Y + VALUE_LINE_H <= containerHeight)
 		{
-			return DEFAULT_Y;
+			return VALUE_LINE_Y;
 		}
-		return Math.max(0, containerHeight - LINE_HEIGHT);
+		return Math.max(0, containerHeight - VALUE_LINE_H);
 	}
 
-	/** Full container width when known, the classic chatbox width if not. */
-	static int hintWidth(int containerWidth)
+	/** Value line width: container minus symmetric margins, classic
+	 *  chatbox width if the container has no size yet. */
+	static int valueLineWidth(int containerWidth)
 	{
-		return containerWidth > 0 ? containerWidth : DEFAULT_WIDTH;
+		return containerWidth > 0
+			? Math.max(0, containerWidth - 2 * VALUE_LINE_X)
+			: DEFAULT_VALUE_WIDTH;
 	}
 }
