@@ -160,6 +160,9 @@ public class RuneFlipCompanionPlugin extends Plugin
 	/** The ONLY writer of GE input fields; every write is click-gated and
 	 *  editor-validated inside the service. */
 	private GeFieldAssistService fieldAssist;
+	/** The ONLY runner of the GE search SELECT script (v0.8.17); every
+	 *  select is click-time gated inside the service (#1 primary only). */
+	private GeSearchAssistService searchAssist;
 	/** #1 of the last rendered Fast Flip selection — the single primary GE
 	 *  suggestion (v0.8.10). #2/#3 are never stored: they cannot assist. */
 	private volatile RuneFlipData.FastFlipItem primaryFlip;
@@ -223,6 +226,7 @@ public class RuneFlipCompanionPlugin extends Plugin
 		apiClient = new RuneFlipApiClient(okHttpClient, gson);
 		sessionTracker = new SessionTracker(System.currentTimeMillis());
 		fieldAssist = new GeFieldAssistService(client);
+		searchAssist = new GeSearchAssistService(client, fieldAssist);
 		chatboxHint = new GeChatboxHint(client);
 		assistHotkey = new GeFieldAssistHotkey(
 			keyManager, () -> config.geFieldAssistHotkey(), this::onAssistHotkey);
@@ -254,6 +258,7 @@ public class RuneFlipCompanionPlugin extends Plugin
 			assistHotkey = null;
 		}
 		chatboxHint = null;
+		searchAssist = null;
 		if (navButton != null)
 		{
 			clientToolbar.removeNavigation(navButton);
@@ -577,11 +582,17 @@ public class RuneFlipCompanionPlugin extends Plugin
 			GeFieldAssist.hintFor(field, primaryName, qty, price, keyLabel);
 
 		Runnable onClick = null;
-		if (text != null && field == GeFieldAssist.Field.ITEM_SEARCH)
+		GeSearchAssistService select = searchAssist;
+		if (text != null && field == GeFieldAssist.Field.ITEM_SEARCH
+			&& select != null)
 		{
-			String name = primaryName;
-			onClick = () -> assist.prepareItemSearch(
-				name, GeFieldAssist.ActionSource.USER_CLICK);
+			// The functional row (v0.8.17): the user's click SELECTS the #1
+			// primary into the open search — gated at click time inside the
+			// service (USER_CLICK + search open + id == #1 only). No
+			// price/qty is set by this flow and no offer is confirmed.
+			RuneFlipData.FastFlipItem item = primary;
+			onClick = () -> select.selectPrimaryItem(
+				item, item.itemId, GeFieldAssist.ActionSource.USER_CLICK);
 		}
 		else if (text != null && field == GeFieldAssist.Field.QUANTITY)
 		{
@@ -603,11 +614,12 @@ public class RuneFlipCompanionPlugin extends Plugin
 		}
 		else if (field == GeFieldAssist.Field.ITEM_SEARCH)
 		{
-			// Own icon+text row in the results area (v0.8.16) — only while
-			// the search is still empty; once the user types, real results
-			// own that space and the hint must never overlap them.
+			// Functional icon+text row in the results area (v0.8.17) — only
+			// while the search is still empty; once the user types, real
+			// results own that space and the row must never overlap them.
 			result = assist.isSearchInputEmpty()
-				? hintView.showSearchRow(text, primary.itemId,
+				? hintView.showSearchRow(text,
+					RuneFlipPanel.sanitizeName(primaryName), primary.itemId,
 					assist.isNativeLastSearchShowing(), onClick)
 				: hintView.clear();
 		}

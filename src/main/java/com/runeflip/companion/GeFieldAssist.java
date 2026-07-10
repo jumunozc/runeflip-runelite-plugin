@@ -67,6 +67,32 @@ final class GeFieldAssist
 	}
 
 	/**
+	 * Gate for the clickable "RuneFlip item:" search row (v0.8.17) — the
+	 * ONLY path that may select an item into the GE search, and the
+	 * strictest gate in the plugin. Every condition must hold:
+	 * <ul>
+	 *   <li>{@link ActionSource#USER_CLICK} only — the user's own click on
+	 *       the row itself. Unlike the field prepares, even the hotkey is
+	 *       rejected here (the hotkey keeps its prepare-search-TEXT
+	 *       semantics); AUTOMATIC/background is rejected as always.</li>
+	 *   <li>the GE item search must be open right now;</li>
+	 *   <li>the item id must be valid;</li>
+	 *   <li>the item must BE the #1 primary suggestion — #2/#3 of the Top 3
+	 *       (or any other item) can never activate the search assist.</li>
+	 * </ul>
+	 * Selecting only loads the item into the offer setup — price/quantity
+	 * are never set by this flow and the offer is never confirmed.
+	 */
+	static boolean canSelectSearchItem(
+		ActionSource source, boolean searchOpen, int itemId, int primaryItemId)
+	{
+		return source == ActionSource.USER_CLICK
+			&& searchOpen
+			&& itemId > 0
+			&& itemId == primaryItemId;
+	}
+
+	/**
 	 * Classifies the GE chatbox prompt into the editor being shown. The real
 	 * prompts (v0.8.13, +search helper in v0.8.14): "What would you like to
 	 * buy?" / "What would you like to sell?" and the helper line "Start

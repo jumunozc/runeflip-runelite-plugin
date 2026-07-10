@@ -191,7 +191,7 @@ public class RuneFlipPanel extends PluginPanel
 	private static final int MAX_NAME_CHARS = 40;
 	/** Shown in the header next to the wordmark (v0.8.7 design). Must match
 	 *  build.gradle's version — pinned by RuneFlipPanelTextTest. */
-	static final String PLUGIN_VERSION = "0.8.16";
+	static final String PLUGIN_VERSION = "0.8.17";
 
 	/**
 	 * Pairing callbacks implemented by the plugin (v0.6.3). Both are

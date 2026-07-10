@@ -40,26 +40,37 @@ or session data; never receives commands from the backend.
   chip, Flipping-Copilot style. #2/#3 stay informational and cannot be
   selected as the suggestion.
 - **Explicit GE Field Assist (v0.8.11, click-gated; visible since
-  v0.8.13).** Official rule: **RuneFlip can prepare GE fields after explicit
-  user action, but must never submit or execute the offer.** While the
-  matching GE editor is open you get, Copilot-style:
-  - a **visible chatbox hint** — `RuneFlip item: <item>` on the GE search
-    (always the #1 suggestion), `Press [<key>] to set RuneFlip price:
+  v0.8.13; functional search row since v0.8.17).** Official rule:
+  **RuneFlip can prepare GE fields after explicit user action, but must
+  never submit or execute the offer.** While the matching GE editor is
+  open you get, Copilot-style:
+  - a **clickable "RuneFlip item" row** on the GE search — item icon +
+    `RuneFlip item: <item>` in the previous-search zone (on its own line
+    below the game's "Last search:" row when that is showing, and removed
+    the moment you type so it never covers real results). Clicking it
+    **selects** that item into the offer setup — the same thing clicking a
+    native search result does, via the game's own previous-search select
+    script. Always the **#1 primary suggestion only** (#2/#3 never), only
+    while the search is really open, only on **your click** — and it never
+    sets price/quantity and never confirms;
+  - **top-left value hints** — `Press [<key>] to set RuneFlip price:
     <price> gp` on the price editor (buy offers get the buy target, sell
     offers the sell target) and `Press [<key>] to set RuneFlip quantity:
-    <qty>` on the quantity editor. The hint is clickable and only appears
-    on the real GE prompts — an unknown editor shows nothing;
+    <qty>` on the quantity editor, left-aligned at the top of the chatbox
+    in the same column as the flipping tracker lines. Clickable, and only
+    shown on the real GE prompts — an unknown editor shows nothing;
   - the **assist hotkey** (default **Right Brace `]`**, rebindable in the
-    config if it conflicts): press it while the editor is open and the
-    hinted value is prepared;
+    config if it conflicts): press it while a value editor is open and the
+    hinted value is prepared (on the search it only pre-types the #1
+    item's name — the row click is the select path);
   - the right-click `RuneFlip: select / set qty / set price` options.
 
-  All three prepare the pending typed value — exactly as if you had typed
-  it — and print *"RuneFlip prepared the value. Review manually."* You
-  still press Enter, still review, and still confirm every offer yourself.
-  Your own key press is **listened** through RuneLite's KeyManager, never
-  synthesized. Toggles: **GE field assist** (on) and **GE field assist
-  hotkey**.
+  The value paths prepare the pending typed value — exactly as if you had
+  typed it — and print *"RuneFlip prepared the value. Review manually."*
+  You still press Enter, still review, and still confirm every offer
+  yourself. Your own key press is **listened** through RuneLite's
+  KeyManager, never synthesized. Toggles: **GE field assist** (on) and
+  **GE field assist hotkey**.
 - **Context-aware GE panel (v0.8.4, focused in v0.8.5, display-only).** When you
   open an item in the Grand Exchange Buy/Sell setup, the panel shows *that
   item's* RuneFlip context: Wiki **low/high** legs, safe/quick/recommended

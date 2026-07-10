@@ -135,6 +135,46 @@ public class GeFieldAssistTest
 			GeFieldAssist.classifyEditor(false, false, null));
 	}
 
+	// ── clickable search row: the select gate (v0.8.17) ──────────────────────
+
+	@Test
+	public void searchSelectRequiresAUserClickOnly()
+	{
+		// The full gate: user's own click + open search + valid #1 match.
+		assertTrue(GeFieldAssist.canSelectSearchItem(
+			GeFieldAssist.ActionSource.USER_CLICK, true, 560, 560));
+		// Even the hotkey is rejected — it keeps prepare-text semantics;
+		// the row click is the only select path.
+		assertFalse(GeFieldAssist.canSelectSearchItem(
+			GeFieldAssist.ActionSource.USER_HOTKEY, true, 560, 560));
+		// Automatic/background execution: always rejected.
+		assertFalse(GeFieldAssist.canSelectSearchItem(
+			GeFieldAssist.ActionSource.AUTOMATIC, true, 560, 560));
+		assertFalse(GeFieldAssist.canSelectSearchItem(null, true, 560, 560));
+	}
+
+	@Test
+	public void searchSelectRequiresTheOpenSearchEditor()
+	{
+		// Search closed (or unknown prompt → not detected as open): no-op.
+		assertFalse(GeFieldAssist.canSelectSearchItem(
+			GeFieldAssist.ActionSource.USER_CLICK, false, 560, 560));
+	}
+
+	@Test
+	public void searchSelectAcceptsOnlyTheNumberOnePrimary()
+	{
+		// Any item other than the #1 primary — #2/#3 of the Top 3 included —
+		// can never activate the search assist.
+		assertFalse(GeFieldAssist.canSelectSearchItem(
+			GeFieldAssist.ActionSource.USER_CLICK, true, 4151, 560));
+		// Invalid item ids never select.
+		assertFalse(GeFieldAssist.canSelectSearchItem(
+			GeFieldAssist.ActionSource.USER_CLICK, true, 0, 0));
+		assertFalse(GeFieldAssist.canSelectSearchItem(
+			GeFieldAssist.ActionSource.USER_CLICK, true, -1, -1));
+	}
+
 	// ── visible hint model (v0.8.14) ─────────────────────────────────────────
 
 	@Test

@@ -61,12 +61,16 @@ public class ComplianceScanTest
 	};
 
 	/**
-	 * Field-prepare writes (v0.8.11): allowed ONLY inside the assist service,
-	 * where they are click/hotkey-gated and editor-validated. Anywhere else
-	 * fails.
+	 * Field-prepare writes (v0.8.11): the pending-input write is allowed
+	 * ONLY inside the field-assist service; scripts (v0.8.17) only inside
+	 * the two services, each pinned to its single allowed script below.
+	 * Anywhere else fails.
 	 */
-	private static final String[] FIELD_WRITE_TOKENS = {
-		"setVarcStrValue", "runScript",
+	private static final String[] INPUT_WRITE_TOKENS = {
+		"setVarcStrValue",
+	};
+	private static final String[] SCRIPT_TOKENS = {
+		"runScript",
 	};
 
 	/**
@@ -80,6 +84,7 @@ public class ComplianceScanTest
 	};
 
 	private static final String ASSIST_SERVICE = "GeFieldAssistService.java";
+	private static final String SEARCH_SERVICE = "GeSearchAssistService.java";
 	private static final String HOTKEY_HOLDER = "GeFieldAssistHotkey.java";
 
 	@Test
@@ -113,16 +118,28 @@ public class ComplianceScanTest
 					}
 				}
 			}
-			if (fileName.equals(ASSIST_SERVICE))
+			if (!fileName.equals(ASSIST_SERVICE))
 			{
-				continue;
-			}
-			for (String token : FIELD_WRITE_TOKENS)
-			{
-				if (code.contains(token))
+				for (String token : INPUT_WRITE_TOKENS)
 				{
-					violations.add(fileName + " → " + token
-						+ " (allowed only in " + ASSIST_SERVICE + ")");
+					if (code.contains(token))
+					{
+						violations.add(fileName + " → " + token
+							+ " (allowed only in " + ASSIST_SERVICE + ")");
+					}
+				}
+			}
+			if (!fileName.equals(ASSIST_SERVICE)
+				&& !fileName.equals(SEARCH_SERVICE))
+			{
+				for (String token : SCRIPT_TOKENS)
+				{
+					if (code.contains(token))
+					{
+						violations.add(fileName + " → " + token
+							+ " (allowed only in " + ASSIST_SERVICE + " and "
+							+ SEARCH_SERVICE + ")");
+					}
 				}
 			}
 		}
@@ -161,6 +178,47 @@ public class ComplianceScanTest
 			assertEquals("the service may only redraw the prepared input",
 				"ScriptID.CHAT_TEXT_INPUT_REBUILD", scripts.group());
 		}
+	}
+
+	/**
+	 * The search-select service (v0.8.17) must BE its own quarantine: the
+	 * ONLY script it may run is the game's previous-search SELECT handler
+	 * (the verified script id the native "Last search:" row dispatches),
+	 * every select must pass the strict click-time gate (USER_CLICK + open
+	 * search + #1 primary only), the official rule must be documented at
+	 * the writer, and it must hold no pending-input write of its own.
+	 */
+	@Test
+	public void searchSelectIsClickGatedInsideTheSearchService() throws IOException
+	{
+		String raw = read(SEARCH_SERVICE);
+		String code = stripComments(raw);
+
+		assertTrue("the search service must actually hold the select script",
+			code.contains("runScript"));
+		assertTrue("every select must pass the click-time gate",
+			code.contains("GeFieldAssist.canSelectSearchItem("));
+		assertTrue("the official rule must be documented at the writer",
+			raw.contains("must never submit or execute the offer"));
+		assertTrue("the pending-input write stays out of the search service",
+			!code.contains("setVarcStrValue"));
+
+		// The verified select script, pinned: no other script id — by
+		// constant or literal — may ever be dispatched from here.
+		assertTrue("the select script constant must be the verified id 754",
+			code.contains("GE_SEARCH_SELECT_SCRIPT = 754"));
+		Matcher calls = Pattern.compile(
+			"runScript\\(\\s*([A-Za-z0-9_]+)").matcher(code);
+		int callCount = 0;
+		while (calls.find())
+		{
+			callCount++;
+			assertEquals("the search service may only run the SELECT script",
+				"GE_SEARCH_SELECT_SCRIPT", calls.group(1));
+		}
+		assertTrue("expected exactly one select call site", callCount == 1);
+		assertTrue("no ScriptID constant may be dispatched from here",
+			!code.contains("ScriptID."));
 	}
 
 	/** Every prepare call site must pass the user's own explicit source —

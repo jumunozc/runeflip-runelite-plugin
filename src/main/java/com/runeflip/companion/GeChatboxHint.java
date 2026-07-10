@@ -11,25 +11,28 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Visible GE chatbox hint (v0.8.13; layout polished in v0.8.16 to the
- * Flipping-Copilot look). Two layouts, both display-only:
+ * Visible GE chatbox hint (v0.8.13; Copilot-style layout since v0.8.16;
+ * clickable search row + top-left value line since v0.8.17). Two layouts:
  *
  * <ul>
  *   <li><b>Search row</b> — while the GE item search is open and still
- *       EMPTY, one row renders at the top of the search-results area (the
- *       slot the game's own "Last search:" row uses — below the "What would
- *       you like to buy/sell?" prompt and the typed-input line, above the
- *       "Start typing the name of an item…" helper): a small ITEM ICON on
- *       the left and "RuneFlip item: …" left-aligned next to it. When the
- *       native last-search row is showing, the hint sits one row height
- *       BELOW it. Once the user types, real results own the area and the
- *       hint is removed — it never overlaps them, the scrollbar or the
- *       "Show last searched" checkbox (the row ends at the same right edge
- *       as the native row content).</li>
- *   <li><b>Value line</b> — on the qty/price editors, one left-aligned line
- *       ("Press [key] to set RuneFlip price/quantity: …") on its OWN row
- *       under the prompt, never over it (the proven Flipping-Copilot
- *       geometry: x=10, y=40).</li>
+ *       EMPTY, one functional row renders in the previous-search zone of
+ *       the results area: a full-row click surface (hover-highlighted,
+ *       menu action "Select"), a small ITEM ICON and "RuneFlip item: …"
+ *       left-aligned next to it — the same anatomy as the game's own
+ *       "Last search:" row. When the native last-search row is showing,
+ *       the RuneFlip row sits one row height BELOW it on its own line.
+ *       Once the user types, real results own the area and the row is
+ *       removed — it never overlaps them, the scrollbar or the "Show last
+ *       searched" checkbox (the row ends at the native content's right
+ *       edge).</li>
+ *   <li><b>Value line</b> — on the qty/price editors, one left-aligned
+ *       line ("Press [key] to set RuneFlip price/quantity: …") at the
+ *       TOP-LEFT of the chatbox, in the same left column as the flipping
+ *       tracker lines ("no buy tracked" / "set to wiki insta buy: …") and
+ *       directly below their two slots — never centered, never over the
+ *       "Set a price…"/"How many…" prompt, the typed input or those
+ *       existing red lines.</li>
  * </ul>
  *
  * <p>Rebuild-safe: attachment to the parent's real child slot is verified
@@ -38,13 +41,15 @@ import org.slf4j.LoggerFactory;
  * hint always lands inside the visible area. Closing the editor removes the
  * hint.
  *
- * <p>COMPLIANCE: this adds purely presentational child widgets to a chatbox
- * layer (the standard overlay technique of Plugin Hub flipping tools). It
- * reads and mutates nothing of the game's own widgets, fires no script, and
- * performs no input. The hint may carry a click listener — a RuneLite
- * widget-op callback that only runs when the USER clicks the hint itself,
- * routing to {@link GeFieldAssistService} where the write stays gated
- * (explicit source + verified editor, prepare-only, never submit).
+ * <p>COMPLIANCE: this adds presentational child widgets of its own to a
+ * chatbox layer (the standard overlay technique of Plugin Hub flipping
+ * tools). It reads and mutates nothing of the game's own widgets and
+ * performs no input. Click listeners are RuneLite widget-op callbacks that
+ * only run when the USER clicks the hint itself, and both routes stay
+ * gated at click time: the search row routes to
+ * {@link GeSearchAssistService} (select the #1 primary into the open
+ * search — never price/qty, never confirm), the value line to
+ * {@link GeFieldAssistService} (prepare the pending input — never submit).
  * Must be called on the client thread.
  */
 class GeChatboxHint
@@ -70,19 +75,27 @@ class GeChatboxHint
 	/** Text width capped so the row ends at the native row's right edge —
 	 *  clear of the scrollbar and the "Show last searched" checkbox. */
 	static final int SEARCH_TEXT_W = 216;
+	/** Full-row click surface width — the native row content span
+	 *  (x=114..370), identical to the reference implementation. */
+	static final int SEARCH_ROW_W = 256;
 
-	// ── value-editor line geometry (proven Flipping-Copilot placement:
-	//    an own line under the prompt, never over it) ────────────────────────
+	// ── value-editor line geometry (v0.8.17: TOP-LEFT column, the slot
+	//    directly below the flipping tracker lines) ─────────────────────────
 	static final int VALUE_LINE_X = 10;
-	static final int VALUE_LINE_Y = 40;
-	static final int VALUE_LINE_H = 16;
-	/** The native prompt ("How many…"/"Set a price…") renders above this
-	 *  band; the value line must start at or below it. */
-	static final int NATIVE_PROMPT_BAND_H = 36;
+	static final int VALUE_LINE_Y = 34;
+	static final int VALUE_LINE_H = 13;
+	/** The two tracker lines ("no buy tracked" / "set to wiki insta
+	 *  buy: …") occupy the left column's y=5 and y=20 slots; their text
+	 *  band ends here — the value line starts at or below it. */
+	static final int TRACKER_LINES_BOTTOM = 34;
+	/** The native centered prompt ("How many…"/"Set a price…") starts
+	 *  around this y — the value line must end above it. */
+	static final int NATIVE_PROMPT_TOP = 47;
 	/** Fallback line width when the container reports no size yet. */
 	static final int DEFAULT_VALUE_WIDTH = 475;
 
 	private final Client client;
+	private Widget rowSurface;
 	private Widget icon;
 	private Widget text;
 	/** Idempotency key: layout kind + text + position + item — anything
@@ -108,15 +121,20 @@ class GeChatboxHint
 	}
 
 	/**
-	 * Shows (or keeps) the search row: [item icon] "RuneFlip item: …",
-	 * left-aligned in the native previous-search slot of the results area.
-	 * {@code belowNativeRow} drops it one row height when the game's own
-	 * "Last search:" row occupies the top slot. An {@code itemId <= 0}
-	 * falls back to text-only at the same position. Idempotent per tick;
-	 * re-creates after any chatbox rebuild.
+	 * Shows (or keeps) the functional search row: a full-row click surface
+	 * (menu action "Select", hover highlight — the native previous-search
+	 * anatomy) with the [item icon] and "RuneFlip item: …" left-aligned on
+	 * it. {@code belowNativeRow} drops it one row height when the game's
+	 * own "Last search:" row occupies the top slot, so the two never
+	 * overlap. An {@code itemId <= 0} falls back to text-only at the same
+	 * position. {@code onUserClick} runs ONLY on the user's own click on
+	 * the row — the plugin routes it to the click-time-gated
+	 * {@link GeSearchAssistService}. Idempotent per tick; re-creates after
+	 * any chatbox rebuild.
 	 */
 	Result showSearchRow(
-		String value, int itemId, boolean belowNativeRow, Runnable onUserClick)
+		String value, String menuTarget, int itemId, boolean belowNativeRow,
+		Runnable onUserClick)
 	{
 		if (value == null || value.isEmpty())
 		{
@@ -136,11 +154,39 @@ class GeChatboxHint
 		String key = "search|" + value + '|' + itemId + '|' + y
 			+ '|' + parent.getId();
 		if (key.equals(stateKey) && attached(parent, text)
+			&& attached(parent, rowSurface)
 			&& (itemId <= 0 || attached(parent, icon)))
 		{
 			return Result.KEPT;
 		}
 		clear();
+
+		// Full-row click surface first (lowest z), exactly the native row
+		// span: invisible at rest, faint highlight on hover, one "Select"
+		// menu op that runs only on the user's own click.
+		Widget row = parent.createChild(-1, WidgetType.RECTANGLE);
+		row.setFilled(true);
+		row.setTextColor(0xFF_FFFF);
+		row.setOpacity(255);
+		row.setOriginalX(SEARCH_ICON_X);
+		row.setOriginalY(y);
+		row.setOriginalWidth(SEARCH_ROW_W);
+		row.setOriginalHeight(SEARCH_ROW_H);
+		if (onUserClick != null)
+		{
+			row.setName(menuTarget == null || menuTarget.isEmpty()
+				? "" : "<col=ff9040>" + menuTarget + "</col>");
+			row.setAction(0, "Select");
+			row.setHasListener(true);
+			row.setOnOpListener((JavaScriptCallback) ev -> onUserClick.run());
+			row.setOnMouseRepeatListener(
+				(JavaScriptCallback) ev -> row.setOpacity(200));
+			row.setOnMouseLeaveListener(
+				(JavaScriptCallback) ev -> row.setOpacity(255));
+		}
+		row.revalidate();
+		rowSurface = row;
+
 		if (itemId > 0)
 		{
 			Widget ic = parent.createChild(-1, WidgetType.GRAPHIC);
@@ -166,7 +212,6 @@ class GeChatboxHint
 		t.setOriginalHeight(SEARCH_ROW_H);
 		t.setXTextAlignment(WidgetTextAlignment.LEFT);
 		t.setYTextAlignment(WidgetTextAlignment.CENTER);
-		makeClickable(t, onUserClick, SEARCH_TEXT_COLOR);
 		t.revalidate();
 		text = t;
 		stateKey = key;
@@ -175,8 +220,11 @@ class GeChatboxHint
 	}
 
 	/**
-	 * Shows (or keeps) the value-editor line on its own left-aligned row
-	 * under the qty/price prompt. Idempotent per tick; re-creates after any
+	 * Shows (or keeps) the value-editor line at the TOP-LEFT of the
+	 * chatbox — the left-column slot directly below the flipping tracker
+	 * lines ("no buy tracked" / "set to wiki insta buy: …"), left-aligned
+	 * and never centered, clear of the native prompt, the typed input and
+	 * those existing lines. Idempotent per tick; re-creates after any
 	 * chatbox rebuild.
 	 */
 	Result showValueLine(String value, Runnable onUserClick)
@@ -212,7 +260,7 @@ class GeChatboxHint
 		t.setOriginalWidth(valueLineWidth(parent.getWidth()));
 		t.setOriginalHeight(VALUE_LINE_H);
 		t.setXTextAlignment(WidgetTextAlignment.LEFT);
-		t.setYTextAlignment(WidgetTextAlignment.CENTER);
+		t.setYTextAlignment(WidgetTextAlignment.TOP);
 		makeClickable(t, onUserClick, VALUE_TEXT_COLOR);
 		t.revalidate();
 		text = t;
@@ -224,6 +272,10 @@ class GeChatboxHint
 	/** Hides the current hint (safe on stale/recycled references). */
 	Result clear()
 	{
+		if (rowSurface != null)
+		{
+			rowSurface.setHidden(true);
+		}
 		if (icon != null)
 		{
 			icon.setHidden(true);
@@ -239,6 +291,7 @@ class GeChatboxHint
 	/** Drops references without touching widgets (parent gone/rebuilt). */
 	private void forget()
 	{
+		rowSurface = null;
 		icon = null;
 		text = null;
 		stateKey = null;
@@ -300,8 +353,9 @@ class GeChatboxHint
 		return belowNativeRow ? SEARCH_ROW_H : 0;
 	}
 
-	/** Value line y: the own-line slot under the prompt when it fits,
-	 *  clamped onto the container's visible area when it would not. */
+	/** Value line y: the top-left column slot directly below the tracker
+	 *  lines and above the native prompt, clamped onto the container's
+	 *  visible area when it would not fit. */
 	static int valueLineY(int containerHeight)
 	{
 		if (containerHeight <= 0)

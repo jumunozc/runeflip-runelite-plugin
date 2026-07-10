@@ -48,6 +48,13 @@ public class GeChatboxHintTest
 		// + "Show last searched" checkbox) untouched.
 		assertTrue(GeChatboxHint.SEARCH_TEXT_X + GeChatboxHint.SEARCH_TEXT_W
 			<= 370);
+		// The full-row click surface spans exactly the native row content
+		// (114..370) — same bound, and it covers icon + text completely so
+		// one click anywhere on the row selects.
+		assertEquals(370,
+			GeChatboxHint.SEARCH_ICON_X + GeChatboxHint.SEARCH_ROW_W);
+		assertTrue(GeChatboxHint.SEARCH_TEXT_X + GeChatboxHint.SEARCH_TEXT_W
+			<= GeChatboxHint.SEARCH_ICON_X + GeChatboxHint.SEARCH_ROW_W);
 	}
 
 	@Test
@@ -58,28 +65,41 @@ public class GeChatboxHintTest
 		assertEquals(32, GeChatboxHint.SEARCH_ROW_H);
 	}
 
-	// ── value line: own row under the qty/price prompt ──────────────────────
+	// ── value line: top-left column, third slot (v0.8.17) ───────────────────
 
 	@Test
-	public void valueLineSitsOnItsOwnRowBelowThePrompt()
+	public void valueLineSitsTopLeftBelowTheTrackerLines()
 	{
-		// The native prompt band renders above NATIVE_PROMPT_BAND_H; the
-		// line starts at or below it, so it never steps on the prompt.
+		// Left column, not centered: same x indent as the flipping tracker
+		// lines ("no buy tracked" / "set to wiki insta buy: …").
+		assertEquals(10, GeChatboxHint.VALUE_LINE_X);
+		// Directly below the trackers' two slots (y=5 and y=20, text ends
+		// at 34) — aligned with them, never over them.
 		assertTrue(GeChatboxHint.VALUE_LINE_Y
-			>= GeChatboxHint.NATIVE_PROMPT_BAND_H);
+			>= GeChatboxHint.TRACKER_LINES_BOTTOM);
+	}
+
+	@Test
+	public void valueLineEndsAboveTheNativePromptAndInput()
+	{
+		// The centered "Set a price…"/"How many…" prompt starts around
+		// y=47 with the typed input below it — the line must end first, so
+		// it never steps on the prompt, the asterisk or the input.
+		assertTrue(GeChatboxHint.VALUE_LINE_Y + GeChatboxHint.VALUE_LINE_H
+			<= GeChatboxHint.NATIVE_PROMPT_TOP);
 		assertEquals(GeChatboxHint.VALUE_LINE_Y, GeChatboxHint.valueLineY(142));
 	}
 
 	@Test
 	public void valueLineClampsIntoShortContainers()
 	{
-		// Unknown height → the classic own-line slot.
+		// Unknown height → the classic top-left slot.
 		assertEquals(GeChatboxHint.VALUE_LINE_Y, GeChatboxHint.valueLineY(0));
-		// 40 + 16 would overflow a 50px container → bottom-anchored.
-		assertEquals(50 - GeChatboxHint.VALUE_LINE_H,
-			GeChatboxHint.valueLineY(50));
+		// 34 + 13 would overflow a 40px container → bottom-anchored.
+		assertEquals(40 - GeChatboxHint.VALUE_LINE_H,
+			GeChatboxHint.valueLineY(40));
 		// Degenerate containers never yield a negative y.
-		assertEquals(0, GeChatboxHint.valueLineY(10));
+		assertEquals(0, GeChatboxHint.valueLineY(5));
 	}
 
 	@Test
