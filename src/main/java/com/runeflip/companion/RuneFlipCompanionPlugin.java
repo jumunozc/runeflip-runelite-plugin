@@ -539,21 +539,68 @@ public class RuneFlipCompanionPlugin extends Plugin
 		// current config. OFF by default — display-only otherwise.
 		boolean assistedSetup = config.enableAssistedOfferSetup();
 		apiClient.fetchStrategyPreferences(url, clientId,
-			prefs -> apiClient.fetchFastFlipOverview(url,
-				RuneFlipApiClient.strategyQueryOf(prefs), clientId,
-				response -> SwingUtilities.invokeLater(
-					() -> target.updateFastFlip(response, assistedSetup)),
-				() -> SwingUtilities.invokeLater(
-					() -> target.updateFastFlip(null, assistedSetup))),
-			() -> apiClient.fetchFastFlipOverview(url, "", clientId,
-				response -> SwingUtilities.invokeLater(
-					() -> target.updateFastFlip(response, assistedSetup)),
-				() -> SwingUtilities.invokeLater(
-					() -> target.updateFastFlip(null, assistedSetup))));
+			prefs -> loadFastFlip(url, RuneFlipApiClient.strategyQueryOf(prefs),
+				clientId, assistedSetup, target),
+			() -> loadFastFlip(url, "", clientId, assistedSetup, target));
 
 		apiClient.fetchCompletedAlerts(url, clientId,
 			response -> SwingUtilities.invokeLater(() -> target.updateCompleted(response)),
 			() -> SwingUtilities.invokeLater(() -> target.updateCompleted(null)));
+	}
+
+	/**
+	 * Fetches GET /fast-flip/overview with the given (already-validated) strategy
+	 * query and renders it. Logs a safe one-line diagnostic (v0.8.5-c): the
+	 * endpoint, the strategy params and the per-section counts — never the client
+	 * id or any token — so a "Fast flip · 0" report can be traced to the strategy
+	 * that filtered everything out. Display only.
+	 */
+	private void loadFastFlip(
+		String url,
+		String strategyQuery,
+		String clientId,
+		boolean assistedSetup,
+		RuneFlipPanel target)
+	{
+		apiClient.fetchFastFlipOverview(url, strategyQuery, clientId,
+			response ->
+			{
+				logFastFlip(strategyQuery, response);
+				SwingUtilities.invokeLater(
+					() -> target.updateFastFlip(response, assistedSetup));
+			},
+			() ->
+			{
+				logFastFlip(strategyQuery, null);
+				SwingUtilities.invokeLater(
+					() -> target.updateFastFlip(null, assistedSetup));
+			});
+	}
+
+	/**
+	 * Safe debug line for the Fast Flip fetch (v0.8.5-c). The strategy query
+	 * carries only timeframe/risk/minProfit/minRoi — never the client id or the
+	 * ingest token — so it is safe to log. Off unless debug logging is enabled.
+	 */
+	private void logFastFlip(
+		String strategyQuery, RuneFlipData.FastFlipOverviewResponse response)
+	{
+		if (!log.isDebugEnabled())
+		{
+			return;
+		}
+		int top = response == null || response.topFlips == null
+			? 0 : response.topFlips.size();
+		int fastBuy = response == null || response.fastBuy == null
+			? 0 : response.fastBuy.size();
+		int fastSell = response == null || response.fastSell == null
+			? 0 : response.fastSell.size();
+		String strategy = strategyQuery == null || strategyQuery.isEmpty()
+			? "default" : strategyQuery;
+		log.debug(
+			"RuneFlip Fast Flip: GET /fast-flip/overview?limit=3 strategy={} "
+				+ "top={} fastBuy={} fastSell={}",
+			strategy, top, fastBuy, fastSell);
 	}
 
 	/** Tiny gold-diamond mark for the sidebar button (drawn, no assets). */

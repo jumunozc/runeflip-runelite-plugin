@@ -150,7 +150,7 @@ yourself**:
 
 1. Build the jar (see **Build** above): `./gradlew clean test build` produces
    `build/libs/runeflip-companion-<version>.jar` (currently
-   `runeflip-companion-0.8.5.jar`).
+   `runeflip-companion-0.8.6.jar`).
 2. Copy that jar into RuneLite's sideloaded-plugins folder:
    - Windows: `%USERPROFILE%\.runelite\sideloaded-plugins\`
    - macOS / Linux: `~/.runelite/sideloaded-plugins/`
@@ -162,6 +162,16 @@ install only a jar you built (or trust). The default **Backend URL**
 (`https://runeflip-api.onrender.com/api`) points at the public RuneFlip
 service; point it at your own backend if you self-host.
 
+> **v0.8.6** (2026-07): hotfix — the contextual panel no longer reads
+> "Fast flip · 0" while the web still lists Top flips. It now falls back from an
+> empty Top ranking to fast-buy/-sell **"General ideas"**, and when nothing
+> matches it shows the current strategy, a **"No matches for current strategy"**
+> line, a concrete relax hint (Medium risk, 30m, lower min profit) and a Refresh
+> button instead of a blank box — so a restrictive saved strategy is never
+> silently empty. Footer reads *"Review manually. RuneFlip never confirms
+> trades."* Display-only, no backend change; `gradlew clean test build` green
+> (85 tests, incl. `ComplianceScanTest`), jar emitted.
+>
 > **v0.8.5** (2026-07): corrects the Wiki vs RuneFlip comparison (buy anchored to
 > the wiki low leg, sell to the high leg) and **focuses** the contextual panel —
 > it shows only the selected-item card or the Top 3 and hides the legacy

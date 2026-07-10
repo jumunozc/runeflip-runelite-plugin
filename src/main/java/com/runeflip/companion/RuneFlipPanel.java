@@ -94,6 +94,17 @@ public class RuneFlipPanel extends PluginPanel
 			+ "manually.";
 	/** Short contextual-card footer (v0.8.5) — the compliance rule, compact. */
 	static final String SHORT_DISCLAIMER = "Review manually.";
+	/** Fast Flip card footer (v0.8.5-c) — the compliance rule in one short line,
+	 *  wide enough that "never confirms trades" is unmistakable in the sidebar. */
+	static final String FAST_FLIP_FOOTER =
+		"Review manually. RuneFlip never confirms trades.";
+	/** Empty Fast Flip state (v0.8.5-c): shown when the current strategy matches
+	 *  nothing and the overview has no fallback candidates either. */
+	static final String NO_MATCH_LINE = "No matches for current strategy.";
+	static final String RELAX_HINT_LINE =
+		"Try Medium risk, 30m timeframe, or lower min profit.";
+	/** Banner over the fast-buy/-sell fallback rows (v0.8.5-c). */
+	static final String GENERAL_IDEAS_LABEL = "General ideas";
 	/** Hard cap so one absurd name can never distort the narrow sidebar. */
 	private static final int MAX_NAME_CHARS = 40;
 
@@ -599,10 +610,22 @@ public class RuneFlipPanel extends PluginPanel
 	{
 		this.assistedSetupEnabled = assistedSetup;
 		fastFlipCard.removeAll();
-		List<RuneFlipData.FastFlipItem> flips =
-			response == null ? null : response.topFlips;
-		int shown = flips == null ? 0 : Math.min(flips.size(), MAX_FAST_FLIP_ROWS);
+
+		// Choose rows honestly (v0.8.5-c): Top ranking first, then the fast-buy/
+		// -sell candidates as "General ideas", then the informative empty state.
+		// Fixes the panel showing "Fast flip · 0" whenever a restrictive saved
+		// strategy emptied ONLY the Top list while the overview still had ideas.
+		FastFlipSelection selection =
+			FastFlipSelection.select(response, MAX_FAST_FLIP_ROWS);
+		int shown = selection.rows.size();
 		fastFlipHeader.setText("Fast flip · " + shown);
+
+		if (selection.source == FastFlipSelection.Source.NONE)
+		{
+			buildFastFlipEmptyState(response);
+			revalidateAll();
+			return;
+		}
 
 		// Strategy Engine summary (v0.8.0): the backend-built description of
 		// how this list was ranked/filtered — display only, verbatim.
@@ -610,21 +633,23 @@ public class RuneFlipPanel extends PluginPanel
 			response == null ? null : response.strategy);
 		if (strategySummary != null)
 		{
-			JLabel strategyLine = new JLabel(html(safe(strategySummary)));
-			strategyLine.setFont(FontManager.getRunescapeSmallFont());
-			strategyLine.setForeground(MUTED);
-			fastFlipCard.add(strategyLine);
+			fastFlipCard.add(mutedLine(strategySummary));
 			fastFlipCard.add(Box.createVerticalStrut(4));
 		}
 
-		if (shown == 0)
+		// General-ideas banner (v0.8.5-c): the Top ranking matched nothing for
+		// the current strategy, so these are liquid fast-buy/-sell candidates —
+		// say so, never pass them off as top-ranked flips.
+		if (selection.source == FastFlipSelection.Source.GENERAL)
 		{
-			JLabel none = new JLabel(html("No fast flips qualify right now."));
-			none.setFont(FontManager.getRunescapeSmallFont());
-			none.setForeground(MUTED);
-			fastFlipCard.add(none);
-			revalidateAll();
-			return;
+			JLabel general = new JLabel(html(
+				"<span style='color:#e3b75d'><b>" + safe(GENERAL_IDEAS_LABEL)
+					+ "</b></span> <span style='color:#878d9c'>— no Top match for "
+					+ "your strategy; showing liquid candidates.</span>"));
+			general.setFont(FontManager.getRunescapeSmallFont());
+			general.setAlignmentX(LEFT_ALIGNMENT);
+			fastFlipCard.add(general);
+			fastFlipCard.add(Box.createVerticalStrut(4));
 		}
 
 		boolean anyAssistedShown = false;
@@ -634,7 +659,7 @@ public class RuneFlipPanel extends PluginPanel
 			{
 				fastFlipCard.add(Box.createVerticalStrut(6));
 			}
-			RuneFlipData.FastFlipItem flip = flips.get(i);
+			RuneFlipData.FastFlipItem flip = selection.rows.get(i);
 			fastFlipCard.add(fastFlipEntry(flip, i + 1, assistedSetup));
 			anyAssistedShown =
 				anyAssistedShown || showAssistedSetup(flip.action, assistedSetup);
@@ -654,13 +679,75 @@ public class RuneFlipPanel extends PluginPanel
 			fastFlipCard.add(Box.createVerticalStrut(4));
 		}
 
-		// Short footer (v0.8.5) — the full backend disclaimer stays on the
-		// dedicated web/mobile screens; here the compact rule is enough.
-		JLabel fastFlipDisclaimer = new JLabel(html(safe(SHORT_DISCLAIMER)));
-		fastFlipDisclaimer.setFont(FontManager.getRunescapeSmallFont());
-		fastFlipDisclaimer.setForeground(MUTED);
-		fastFlipCard.add(fastFlipDisclaimer);
+		fastFlipCard.add(fastFlipFooterLabel());
 		revalidateAll();
+	}
+
+	/**
+	 * Informative empty state for the Fast Flip card (v0.8.5-c): instead of a
+	 * bare "0", show the current strategy, an honest "no matches" line, a concrete
+	 * relax hint and a Refresh button. So a restrictive saved strategy never
+	 * leaves the panel blank and unexplained.
+	 */
+	private void buildFastFlipEmptyState(
+		RuneFlipData.FastFlipOverviewResponse response)
+	{
+		fastFlipCard.add(mutedLine(
+			emptyStrategyLine(response == null ? null : response.strategy)));
+		fastFlipCard.add(Box.createVerticalStrut(4));
+
+		JLabel noMatch = new JLabel(html(safe(NO_MATCH_LINE)));
+		noMatch.setFont(FontManager.getRunescapeSmallFont());
+		noMatch.setForeground(GOLD);
+		noMatch.setAlignmentX(LEFT_ALIGNMENT);
+		fastFlipCard.add(noMatch);
+
+		fastFlipCard.add(mutedLine(RELAX_HINT_LINE));
+		fastFlipCard.add(Box.createVerticalStrut(6));
+
+		// Refresh only re-fetches the read endpoints (display only) — the exact
+		// same action as the header Refresh button.
+		JPanel actions = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+		actions.setOpaque(false);
+		actions.setAlignmentX(LEFT_ALIGNMENT);
+		actions.add(actionButton("Refresh", onRefresh));
+		fastFlipCard.add(actions);
+		fastFlipCard.add(Box.createVerticalStrut(4));
+
+		fastFlipCard.add(fastFlipFooterLabel());
+	}
+
+	/** The Fast Flip card footer (v0.8.5-c) — the compact compliance rule. */
+	private JLabel fastFlipFooterLabel()
+	{
+		JLabel label = new JLabel(html(safe(FAST_FLIP_FOOTER)));
+		label.setFont(FontManager.getRunescapeSmallFont());
+		label.setForeground(MUTED);
+		label.setAlignmentX(LEFT_ALIGNMENT);
+		return label;
+	}
+
+	/** A left-aligned muted line that wraps (html) — used for the strategy and
+	 *  relax-hint lines so long text never renders cut off in the sidebar. */
+	private JLabel mutedLine(String text)
+	{
+		JLabel label = new JLabel(html(safe(text)));
+		label.setFont(FontManager.getRunescapeSmallFont());
+		label.setForeground(MUTED);
+		label.setAlignmentX(LEFT_ALIGNMENT);
+		return label;
+	}
+
+	/**
+	 * Strategy line for the empty state (v0.8.5-c): the backend's strategy
+	 * description when present, or a plain default label when the echo is absent
+	 * (pre-0.8.0 backend) — so the user always sees what filter produced no
+	 * matches.
+	 */
+	static String emptyStrategyLine(RuneFlipData.FastFlipStrategy strategy)
+	{
+		String summary = strategySummaryLine(strategy);
+		return summary != null ? summary : "Strategy: default (risk up to HIGH)";
 	}
 
 	/**
