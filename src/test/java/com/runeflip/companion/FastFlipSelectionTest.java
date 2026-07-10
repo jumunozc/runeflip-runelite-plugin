@@ -6,6 +6,7 @@ import java.util.List;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
@@ -171,6 +172,65 @@ public class FastFlipSelectionTest
 	{
 		assertTrue(RuneFlipPanel.FAST_FLIP_FOOTER.contains("Review manually"));
 		assertTrue(RuneFlipPanel.FAST_FLIP_FOOTER.contains("never confirms trades"));
+	}
+
+	// v0.8.6: the card heading names the row source.
+	@Test
+	public void headerTitleNamesTheRowSource()
+	{
+		assertEquals("Top 3 Fast Flips",
+			RuneFlipPanel.headerTitleOf(FastFlipSelection.Source.TOP, 3));
+		// Honest count when the backend sent fewer than 3 Top rows.
+		assertEquals("Top Fast Flips · 2",
+			RuneFlipPanel.headerTitleOf(FastFlipSelection.Source.TOP, 2));
+		assertEquals("General ideas",
+			RuneFlipPanel.headerTitleOf(FastFlipSelection.Source.GENERAL, 3));
+		assertEquals("Fast flip · 0",
+			RuneFlipPanel.headerTitleOf(FastFlipSelection.Source.NONE, 0));
+	}
+
+	// v0.8.6: compact strategy echo above the rows ("8h · HIGH risk").
+	@Test
+	public void compactStrategyLineFormatsTimeframeAndRisk()
+	{
+		RuneFlipData.FastFlipStrategy strategy = new RuneFlipData.FastFlipStrategy();
+		strategy.timeframeMinutes = 480;
+		strategy.riskLevel = "HIGH";
+		assertEquals("8h · HIGH risk", RuneFlipPanel.compactStrategyLine(strategy));
+
+		strategy.timeframeMinutes = 30;
+		strategy.riskLevel = "MEDIUM";
+		assertEquals("30m · MEDIUM risk", RuneFlipPanel.compactStrategyLine(strategy));
+
+		strategy.timeframeMinutes = 90;
+		assertEquals("1h 30m · MEDIUM risk",
+			RuneFlipPanel.compactStrategyLine(strategy));
+
+		// No echo at all (pre-0.8.0): no line — never derived client-side.
+		assertEquals(null, RuneFlipPanel.compactStrategyLine(null));
+
+		// Partial echo: fall back to the full backend description.
+		RuneFlipData.FastFlipStrategy partial = new RuneFlipData.FastFlipStrategy();
+		partial.description = "8h timeframe · risk up to HIGH";
+		assertEquals("Strategy: 8h timeframe · risk up to HIGH",
+			RuneFlipPanel.compactStrategyLine(partial));
+	}
+
+	// v0.8.6: a failed fetch is offline, never "no matches for your strategy".
+	@Test
+	public void offlineWordingNeverBlamesTheStrategy()
+	{
+		assertTrue(RuneFlipPanel.OFFLINE_LINE.contains("Could not reach"));
+		assertFalse(RuneFlipPanel.OFFLINE_LINE.contains("strategy"));
+		assertTrue(RuneFlipPanel.OFFLINE_HINT_LINE.contains("Backend URL"));
+	}
+
+	// v0.8.6: rows re-fetched with the default strategy are labelled as such.
+	@Test
+	public void defaultFallbackNoteSaysTheSavedStrategyMatchedNothing()
+	{
+		assertTrue(RuneFlipPanel.DEFAULT_FALLBACK_NOTE.contains("Saved strategy"));
+		assertTrue(RuneFlipPanel.DEFAULT_FALLBACK_NOTE.contains("default"));
 	}
 
 	// (d) Contextual mode hides the legacy dashboard + GE completed; (e) a

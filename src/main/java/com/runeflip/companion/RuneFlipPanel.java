@@ -80,8 +80,9 @@ public class RuneFlipPanel extends PluginPanel
 
 	/** Rows shown in the compact completed summary; the rest is "+n more". */
 	private static final int MAX_COMPLETED_ROWS = 3;
-	/** Entries shown in the compact Fast Flip card (backend sends up to 3). */
-	private static final int MAX_FAST_FLIP_ROWS = 3;
+	/** Entries shown in the compact Fast Flip card (backend sends up to 3).
+	 *  Package-visible so the plugin can pre-check a response with the same cap. */
+	static final int MAX_FAST_FLIP_ROWS = 3;
 	/** Shown verbatim when the backend omits its own disclaimer string. */
 	static final String FAST_FLIP_DISCLAIMER =
 		"Fast flip estimates are informational. Review manually before trading.";
@@ -105,6 +106,15 @@ public class RuneFlipPanel extends PluginPanel
 		"Try Medium risk, 30m timeframe, or lower min profit.";
 	/** Banner over the fast-buy/-sell fallback rows (v0.8.5-c). */
 	static final String GENERAL_IDEAS_LABEL = "General ideas";
+	/** Offline Fast Flip state (v0.8.6): a FAILED overview fetch is not "no
+	 *  matches" — it must say so instead of blaming the strategy. */
+	static final String OFFLINE_LINE = "Could not reach the RuneFlip backend.";
+	static final String OFFLINE_HINT_LINE =
+		"Check the Backend URL in the plugin settings, then Refresh.";
+	/** Shown when the saved strategy matched nothing and the panel fell back to
+	 *  the default-strategy ideas instead of an empty box (v0.8.6). */
+	static final String DEFAULT_FALLBACK_NOTE =
+		"Saved strategy matched nothing — showing default strategy.";
 	/** Hard cap so one absurd name can never distort the narrow sidebar. */
 	private static final int MAX_NAME_CHARS = 40;
 
@@ -608,6 +618,20 @@ public class RuneFlipPanel extends PluginPanel
 		RuneFlipData.FastFlipOverviewResponse response,
 		boolean assistedSetup)
 	{
+		updateFastFlip(response, assistedSetup, false);
+	}
+
+	/**
+	 * Rebuilds the Fast Flip card from one overview response. `defaultFallback`
+	 * (v0.8.6) marks a response the plugin re-fetched with the DEFAULT strategy
+	 * after the saved strategy matched nothing — the card then says so instead of
+	 * silently presenting default results as the saved-strategy ones.
+	 */
+	void updateFastFlip(
+		RuneFlipData.FastFlipOverviewResponse response,
+		boolean assistedSetup,
+		boolean defaultFallback)
+	{
 		this.assistedSetupEnabled = assistedSetup;
 		fastFlipCard.removeAll();
 
@@ -618,37 +642,51 @@ public class RuneFlipPanel extends PluginPanel
 		FastFlipSelection selection =
 			FastFlipSelection.select(response, MAX_FAST_FLIP_ROWS);
 		int shown = selection.rows.size();
-		fastFlipHeader.setText("Fast flip · " + shown);
+		fastFlipHeader.setText(headerTitleOf(selection.source, shown));
 
 		if (selection.source == FastFlipSelection.Source.NONE)
 		{
-			buildFastFlipEmptyState(response);
+			// A failed fetch is NOT "no matches" (v0.8.6): blaming the strategy
+			// for a network/HTTP failure sent users relaxing filters for nothing.
+			if (response == null)
+			{
+				buildFastFlipOfflineState();
+			}
+			else
+			{
+				buildFastFlipEmptyState(response);
+			}
 			revalidateAll();
 			return;
 		}
 
-		// Strategy Engine summary (v0.8.0): the backend-built description of
-		// how this list was ranked/filtered — display only, verbatim.
-		String strategySummary = strategySummaryLine(
-			response == null ? null : response.strategy);
-		if (strategySummary != null)
+		// Saved-strategy fallback note (v0.8.6): these rows come from a default-
+		// strategy re-fetch, said explicitly so the strategy line below (the
+		// default echo) cannot be mistaken for the saved strategy.
+		if (defaultFallback)
 		{
-			fastFlipCard.add(mutedLine(strategySummary));
+			fastFlipCard.add(mutedLine(DEFAULT_FALLBACK_NOTE));
 			fastFlipCard.add(Box.createVerticalStrut(4));
 		}
 
-		// General-ideas banner (v0.8.5-c): the Top ranking matched nothing for
+		// Compact strategy echo (v0.8.6): "8h · HIGH risk" — the full backend
+		// description stays in the empty state, where the filter is the point.
+		String strategyLine = compactStrategyLine(
+			response == null ? null : response.strategy);
+		if (strategyLine != null)
+		{
+			fastFlipCard.add(mutedLine(strategyLine));
+			fastFlipCard.add(Box.createVerticalStrut(4));
+		}
+
+		// General-ideas note (v0.8.5-c): the Top ranking matched nothing for
 		// the current strategy, so these are liquid fast-buy/-sell candidates —
-		// say so, never pass them off as top-ranked flips.
+		// say so, never pass them off as top-ranked flips. The header already
+		// reads "General ideas" (v0.8.6); this line explains why.
 		if (selection.source == FastFlipSelection.Source.GENERAL)
 		{
-			JLabel general = new JLabel(html(
-				"<span style='color:#e3b75d'><b>" + safe(GENERAL_IDEAS_LABEL)
-					+ "</b></span> <span style='color:#878d9c'>— no Top match for "
-					+ "your strategy; showing liquid candidates.</span>"));
-			general.setFont(FontManager.getRunescapeSmallFont());
-			general.setAlignmentX(LEFT_ALIGNMENT);
-			fastFlipCard.add(general);
+			fastFlipCard.add(mutedLine(
+				"No Top match for your strategy — showing liquid candidates."));
 			fastFlipCard.add(Box.createVerticalStrut(4));
 		}
 
@@ -715,6 +753,84 @@ public class RuneFlipPanel extends PluginPanel
 		fastFlipCard.add(Box.createVerticalStrut(4));
 
 		fastFlipCard.add(fastFlipFooterLabel());
+	}
+
+	/**
+	 * Offline state for the Fast Flip card (v0.8.6): the overview fetch failed
+	 * (network error, non-2xx, unparseable body), so no strategy verdict exists.
+	 * Says exactly that — never "No matches for current strategy", which blamed
+	 * the user's filters for a connectivity problem.
+	 */
+	private void buildFastFlipOfflineState()
+	{
+		JLabel offline = new JLabel(html(safe(OFFLINE_LINE)));
+		offline.setFont(FontManager.getRunescapeSmallFont());
+		offline.setForeground(GOLD);
+		offline.setAlignmentX(LEFT_ALIGNMENT);
+		fastFlipCard.add(offline);
+
+		fastFlipCard.add(mutedLine(OFFLINE_HINT_LINE));
+		fastFlipCard.add(Box.createVerticalStrut(6));
+
+		JPanel actions = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+		actions.setOpaque(false);
+		actions.setAlignmentX(LEFT_ALIGNMENT);
+		actions.add(actionButton("Refresh", onRefresh));
+		fastFlipCard.add(actions);
+		fastFlipCard.add(Box.createVerticalStrut(4));
+
+		fastFlipCard.add(fastFlipFooterLabel());
+	}
+
+	/**
+	 * Card heading per row source (v0.8.6): "Top 3 Fast Flips" for the Top
+	 * ranking (with the honest count when fewer than 3 arrived), "General ideas"
+	 * for the fast-buy/-sell fallback, and the plain zero for the empty/offline
+	 * states.
+	 */
+	static String headerTitleOf(FastFlipSelection.Source source, int shown)
+	{
+		switch (source)
+		{
+			case TOP:
+				return shown == MAX_FAST_FLIP_ROWS
+					? "Top 3 Fast Flips" : "Top Fast Flips · " + shown;
+			case GENERAL:
+				return "General ideas";
+			default:
+				return "Fast flip · 0";
+		}
+	}
+
+	/**
+	 * Compact strategy echo (v0.8.6): "8h · HIGH risk" built from the response's
+	 * strategy fields. Falls back to the full backend description when either
+	 * field is missing, and to null when there is no echo at all (pre-0.8.0) —
+	 * nothing is ever derived client-side beyond formatting.
+	 */
+	static String compactStrategyLine(RuneFlipData.FastFlipStrategy strategy)
+	{
+		if (strategy == null)
+		{
+			return null;
+		}
+		if (strategy.timeframeMinutes == null || strategy.riskLevel == null)
+		{
+			return strategySummaryLine(strategy);
+		}
+		return timeframeLabel(strategy.timeframeMinutes) + " · "
+			+ strategy.riskLevel + " risk";
+	}
+
+	/** Minutes → "30m" / "8h" / "1h 30m" (formatting only). */
+	static String timeframeLabel(int minutes)
+	{
+		if (minutes < 60)
+		{
+			return minutes + "m";
+		}
+		int rest = minutes % 60;
+		return rest == 0 ? (minutes / 60) + "h" : (minutes / 60) + "h " + rest + "m";
 	}
 
 	/** The Fast Flip card footer (v0.8.5-c) — the compact compliance rule. */

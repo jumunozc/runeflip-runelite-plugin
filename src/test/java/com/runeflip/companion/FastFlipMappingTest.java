@@ -42,8 +42,10 @@ public class FastFlipMappingTest
 		+ "\"confidence\": 82,"
 		+ "\"volatility\": 0.021,"
 		+ "\"spreadStability\": 0.87,"
-		+ "\"dumpRisk\": 0.12,"
-		+ "\"competitionRisk\": 0.33,"
+		// Grade strings, as the backend really sends them (FastFlipAuxRisk) —
+		// typing these numeric broke the whole overview parse (v0.8.6 fix).
+		+ "\"dumpRisk\": \"LOW\","
+		+ "\"competitionRisk\": \"MEDIUM\","
 		+ "\"buyPressurePct\": 54.2,"
 		+ "\"topFlipScore\": 77.3,"
 		+ "\"priceEdge\": {"
@@ -216,8 +218,8 @@ public class FastFlipMappingTest
 		assertEquals(Integer.valueOf(82), flip.confidence);
 		assertEquals(0.021, flip.volatility, 1e-9);
 		assertEquals(0.87, flip.spreadStability, 1e-9);
-		assertEquals(0.12, flip.dumpRisk, 1e-9);
-		assertEquals(0.33, flip.competitionRisk, 1e-9);
+		assertEquals("LOW", flip.dumpRisk);
+		assertEquals("MEDIUM", flip.competitionRisk);
 		assertEquals(54.2, flip.buyPressurePct, 1e-9);
 		assertEquals(77.3, flip.topFlipScore, 1e-9);
 		assertEquals(2, flip.reasons.size());

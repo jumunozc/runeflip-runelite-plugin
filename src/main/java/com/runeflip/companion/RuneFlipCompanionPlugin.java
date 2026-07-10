@@ -553,7 +553,12 @@ public class RuneFlipCompanionPlugin extends Plugin
 	 * query and renders it. Logs a safe one-line diagnostic (v0.8.5-c): the
 	 * endpoint, the strategy params and the per-section counts — never the client
 	 * id or any token — so a "Fast flip · 0" report can be traced to the strategy
-	 * that filtered everything out. Display only.
+	 * that filtered everything out. When a SAVED strategy empties every section
+	 * (v0.8.6) the plugin re-fetches once with the DEFAULT strategy — the exact
+	 * params a fresh web session uses (the backend applies 480 min / HIGH) — and
+	 * the panel labels those rows as the default fallback. A failed fetch logs a
+	 * warning with the normalized URL (user config, no ids) and renders the
+	 * offline state, never "no matches". Display only.
 	 */
 	private void loadFastFlip(
 		String url,
@@ -566,12 +571,37 @@ public class RuneFlipCompanionPlugin extends Plugin
 			response ->
 			{
 				logFastFlip(strategyQuery, response);
+				boolean matchedNothing = FastFlipSelection.select(
+					response, RuneFlipPanel.MAX_FAST_FLIP_ROWS).source
+					== FastFlipSelection.Source.NONE;
+				if (matchedNothing && strategyQuery != null && !strategyQuery.isEmpty())
+				{
+					// Saved strategy filtered everything: show the default-
+					// strategy ideas (labelled as such) instead of an empty box.
+					apiClient.fetchFastFlipOverview(url, "", clientId,
+						fallback ->
+						{
+							logFastFlip("", fallback);
+							SwingUtilities.invokeLater(() ->
+								target.updateFastFlip(fallback, assistedSetup, true));
+						},
+						() -> SwingUtilities.invokeLater(() ->
+							target.updateFastFlip(response, assistedSetup, false)));
+					return;
+				}
 				SwingUtilities.invokeLater(
 					() -> target.updateFastFlip(response, assistedSetup));
 			},
 			() ->
 			{
 				logFastFlip(strategyQuery, null);
+				// Warn (not debug): this is the line that distinguishes a broken
+				// backend URL / network from a strategy that matched nothing.
+				// The URL is the user's own config; no client id, no token.
+				log.warn("RuneFlip fast-flip overview fetch failed: {} (strategy={})",
+					BackendUrl.normalize(url),
+					strategyQuery == null || strategyQuery.isEmpty()
+						? "default" : strategyQuery);
 				SwingUtilities.invokeLater(
 					() -> target.updateFastFlip(null, assistedSetup));
 			});

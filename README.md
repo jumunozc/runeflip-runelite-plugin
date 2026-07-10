@@ -150,7 +150,7 @@ yourself**:
 
 1. Build the jar (see **Build** above): `./gradlew clean test build` produces
    `build/libs/runeflip-companion-<version>.jar` (currently
-   `runeflip-companion-0.8.6.jar`).
+   `runeflip-companion-0.8.7.jar`).
 2. Copy that jar into RuneLite's sideloaded-plugins folder:
    - Windows: `%USERPROFILE%\.runelite\sideloaded-plugins\`
    - macOS / Linux: `~/.runelite/sideloaded-plugins/`
@@ -162,6 +162,18 @@ install only a jar you built (or trust). The default **Backend URL**
 (`https://runeflip-api.onrender.com/api`) points at the public RuneFlip
 service; point it at your own backend if you self-host.
 
+> **v0.8.7** (2026-07): hotfix — fixes the REAL cause of "Fast flip · 0": the
+> backend sends `dumpRisk`/`competitionRisk` as grade strings (`"LOW"`…), but
+> the plugin DTO typed them as numbers, so parsing **every** real overview
+> payload failed and rendered as an empty panel. The DTO now matches the
+> production contract, pinned by a real sanitized production fixture in the
+> test suite. A failed fetch now shows *"Could not reach the RuneFlip
+> backend."* (never "no matches"), a saved strategy that matches nothing falls
+> back to the default-strategy ideas (labelled), the card heading names its
+> source ("Top 3 Fast Flips" / "General ideas") and a compact strategy echo
+> ("8h · HIGH risk") tops the rows. `gradlew clean test build` green (96
+> tests, incl. `ComplianceScanTest`), jar emitted.
+>
 > **v0.8.6** (2026-07): hotfix — the contextual panel no longer reads
 > "Fast flip · 0" while the web still lists Top flips. It now falls back from an
 > empty Top ranking to fast-buy/-sell **"General ideas"**, and when nothing

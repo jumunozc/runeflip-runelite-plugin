@@ -159,8 +159,13 @@ public final class RuneFlipData
 		public Integer confidence;
 		public Double volatility;
 		public Double spreadStability;
-		public Double dumpRisk;
-		public Double competitionRisk;
+		/** Graded auxiliary risks — "LOW" | "MEDIUM" | "HIGH" | "UNKNOWN".
+		 *  The backend has ALWAYS sent these as grade strings
+		 *  (FastFlipAuxRisk); typing them Double (v0.7.0) made Gson throw
+		 *  NumberFormatException on every real overview payload, which the
+		 *  plugin then displayed as "Fast flip · 0" (hotfix v0.8.6). */
+		public String dumpRisk;
+		public String competitionRisk;
 		public Double buyPressurePct;
 		public Double topFlipScore;
 		/** Price Edge targets (v0.7.1); null on pre-0.7.1 backends. */
