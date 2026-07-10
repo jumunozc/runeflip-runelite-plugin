@@ -107,9 +107,13 @@ public class RuneFlipPanel extends PluginPanel
 	 *  null when capital sync is off or nothing was observed ("si existe"). */
 	private Long portfolioCoins;
 	/** ACTIVE strategy echoed by the last overview response — drives which
-	 *  timeframe/risk pill renders highlighted. Never derived client-side. */
+	 *  timeframe/risk pill renders highlighted. Never derived client-side.
+	 *  A pill click sets it OPTIMISTICALLY (v0.8.10) so the UI reacts at once;
+	 *  the next response echo confirms or corrects it. */
 	private Integer activeTimeframe;
 	private String activeRisk;
+	/** In-flight indicator (v0.8.10), visible from pill click to response. */
+	private final JLabel updatingLabel = new JLabel(UPDATING_LINE);
 
 	/** Rows shown in the compact completed summary; the rest is "+n more". */
 	private static final int MAX_COMPLETED_ROWS = 3;
@@ -155,11 +159,19 @@ public class RuneFlipPanel extends PluginPanel
 	/** SessionPanel before any completed offer this session (v0.8.7). */
 	static final String SESSION_EMPTY_LINE =
 		"No completed flips yet this session.";
+	/** Selected-item loading state (v0.8.10): shown the instant a GE item is
+	 *  detected, while its context fetch runs in the background. */
+	static final String ITEM_LOADING_LINE = "Loading item context…";
+	/** Small in-flight indicator next to the Top-3 header (v0.8.10): shown
+	 *  from a pill click until the matching response renders — stale rows are
+	 *  never mistaken for the new strategy, and "no matches" never shows for a
+	 *  request still in flight. */
+	static final String UPDATING_LINE = "Updating…";
 	/** Hard cap so one absurd name can never distort the narrow sidebar. */
 	private static final int MAX_NAME_CHARS = 40;
 	/** Shown in the header next to the wordmark (v0.8.7 design). Must match
 	 *  build.gradle's version — pinned by RuneFlipPanelTextTest. */
-	static final String PLUGIN_VERSION = "0.8.9";
+	static final String PLUGIN_VERSION = "0.8.10";
 
 	/**
 	 * Pairing callbacks implemented by the plugin (v0.6.3). Both are
@@ -348,8 +360,15 @@ public class RuneFlipPanel extends PluginPanel
 		fastFlipHeaderRow.add(fastFlipHeader, BorderLayout.CENTER);
 		// A JButton styled as a link — plain ActionListener, no low-level input
 		// APIs (the compliance scan forbids those even for panel-internal use).
+		JPanel headerRowRight = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
+		headerRowRight.setOpaque(false);
+		updatingLabel.setFont(FontManager.getRunescapeSmallFont());
+		updatingLabel.setForeground(GOLD);
+		updatingLabel.setVisible(false);
+		headerRowRight.add(updatingLabel);
 		JButton refreshLink = linkButton("↻ Refresh", GOLD, onRefresh);
-		fastFlipHeaderRow.add(refreshLink, BorderLayout.EAST);
+		headerRowRight.add(refreshLink);
+		fastFlipHeaderRow.add(headerRowRight, BorderLayout.EAST);
 		fastFlipHeaderRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 20));
 		fastFlipHeaderRow.setAlignmentX(LEFT_ALIGNMENT);
 		add(fastFlipHeaderRow);
@@ -540,6 +559,47 @@ public class RuneFlipPanel extends PluginPanel
 		selectedCard.removeAll();
 		this.hasSelection = false;
 		applyVisibility();
+	}
+
+	/**
+	 * Selected-item LOADING state (v0.8.10): swaps the panel to the context
+	 * card the instant a GE item is detected, with a "Loading item context…"
+	 * placeholder while the fetch runs in the background — the user's action
+	 * reflects immediately instead of after a network round-trip.
+	 */
+	void showSelectedItemLoading()
+	{
+		selectedCard.removeAll();
+		this.hasSelection = true;
+		JLabel loading = new JLabel(html(safe(ITEM_LOADING_LINE)));
+		loading.setFont(FontManager.getRunescapeSmallFont());
+		loading.setForeground(MUTED);
+		loading.setAlignmentX(LEFT_ALIGNMENT);
+		selectedCard.add(loading);
+		applyVisibility();
+	}
+
+	/**
+	 * Optimistic timeframe-pill highlight (v0.8.10): the clicked value renders
+	 * active immediately (null = toggle-off, no highlight until the response
+	 * echo names the effective strategy) and the "Updating…" indicator shows
+	 * until that response renders. Local display state only.
+	 */
+	void showStrategyPendingTimeframe(Integer optimisticMinutes)
+	{
+		this.activeTimeframe = optimisticMinutes;
+		buildStrategyPill();
+		updatingLabel.setVisible(true);
+		revalidateAll();
+	}
+
+	/** Optimistic risk-pill highlight (v0.8.10) — same contract as above. */
+	void showStrategyPendingRisk(String optimisticRisk)
+	{
+		this.activeRisk = optimisticRisk;
+		buildStrategyPill();
+		updatingLabel.setVisible(true);
+		revalidateAll();
 	}
 
 	/**
@@ -1118,9 +1178,13 @@ public class RuneFlipPanel extends PluginPanel
 	{
 		this.assistedSetupEnabled = assistedSetup;
 		fastFlipCard.removeAll();
+		// A rendered response ends the in-flight indicator (v0.8.10); stale
+		// responses never reach here (the plugin drops them by sequence).
+		updatingLabel.setVisible(false);
 
 		// StrategyPill highlight (v0.8.7): mirror the strategy the backend says
-		// it APPLIED to this response — never a client-side guess. A failed
+		// it APPLIED to this response — never a client-side guess (the optimistic
+		// pill value from a click is confirmed or corrected here). A failed
 		// fetch keeps the previous highlight.
 		if (response != null && response.strategy != null)
 		{

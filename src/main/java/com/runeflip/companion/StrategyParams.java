@@ -43,6 +43,25 @@ public final class StrategyParams
 		return query;
 	}
 
+	/**
+	 * Optimistic pill highlight after a timeframe click (v0.8.10): the clicked
+	 * value shows active IMMEDIATELY, before any response. Clicking the already-
+	 * active override toggles it off — the resulting strategy (saved prefs or
+	 * backend default) is unknown until the echo arrives, so null = "no local
+	 * highlight yet, wait for the echo".
+	 */
+	static Integer optimisticTimeframe(int currentOverrideMinutes, int clickedMinutes)
+	{
+		return currentOverrideMinutes == clickedMinutes ? null
+			: Integer.valueOf(clickedMinutes);
+	}
+
+	/** Same optimistic rule for a risk pill click. */
+	static String optimisticRisk(String currentOverride, String clicked)
+	{
+		return clicked != null && clicked.equals(currentOverride) ? null : clicked;
+	}
+
 	/** True for the three grades the backend accepts. */
 	static boolean isValidRisk(String riskLevel)
 	{

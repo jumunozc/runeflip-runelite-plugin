@@ -150,7 +150,7 @@ yourself**:
 
 1. Build the jar (see **Build** above): `./gradlew clean test build` produces
    `build/libs/runeflip-companion-<version>.jar` (currently
-   `runeflip-companion-0.8.9.jar`).
+   `runeflip-companion-0.8.10.jar`).
 2. Copy that jar into RuneLite's sideloaded-plugins folder:
    - Windows: `%USERPROFILE%\.runelite\sideloaded-plugins\`
    - macOS / Linux: `~/.runelite/sideloaded-plugins/`
@@ -162,6 +162,16 @@ install only a jar you built (or trust). The default **Backend URL**
 (`https://runeflip-api.onrender.com/api`) points at the public RuneFlip
 service; point it at your own backend if you self-host.
 
+> **v0.8.10** (2026-07): responsiveness — the panel now reacts instantly.
+> Strategy pills highlight optimistically on click (with an "Updating…"
+> indicator until the response renders), stale responses are dropped so rapid
+> clicks render only the last strategy, short in-memory caches (20s) make
+> pill toggles and item re-selections instant, and opening a GE item shows
+> "Loading item context…" immediately while the fetch runs in the background.
+> Display timing only — no fetch semantics, strategy logic or compliance
+> change. `gradlew clean test build` green (128 tests, incl.
+> `ComplianceScanTest`), jar emitted.
+>
 > **v0.8.9** (2026-07): header hotfix — in the narrow sidebar, "Connected" and
 > "Refresh" overlapped the "RuneFlip v0.8.8" wordmark. The header now stacks
 > two rows (wordmark + version, then status + Refresh); layout only, no logic

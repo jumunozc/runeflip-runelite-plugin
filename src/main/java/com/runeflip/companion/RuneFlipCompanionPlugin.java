@@ -114,6 +114,23 @@ public class RuneFlipCompanionPlugin extends Plugin
 	/** SessionPanel accounting (v0.8.7): pure sums over passively observed
 	 *  offer completions — display only, never an action. */
 	private SessionTracker sessionTracker;
+
+	// ── Responsiveness (v0.8.10) ────────────────────────────────────────────
+	/** Short response caches: toggling pills / re-opening an item re-renders
+	 *  instantly instead of waiting a network round-trip. */
+	private static final long RESPONSE_CACHE_TTL_MS = 20_000;
+	/** Saved-preferences query memo TTL — pill clicks skip the prefs GET. */
+	private static final long PREFS_QUERY_TTL_MS = 30_000;
+	private final ShortTtlCache<RuneFlipData.FastFlipOverviewResponse> overviewCache =
+		new ShortTtlCache<>(RESPONSE_CACHE_TTL_MS);
+	private final ShortTtlCache<RuneFlipData.FastFlipItemContextResponse> itemContextCache =
+		new ShortTtlCache<>(RESPONSE_CACHE_TTL_MS);
+	/** Stale-response guards: only the newest request of each kind renders. */
+	private final RequestSequencer overviewSeq = new RequestSequencer();
+	private final RequestSequencer itemContextSeq = new RequestSequencer();
+	/** Memoized saved-preferences query ("" = defaults); null = not fetched. */
+	private volatile String prefsQueryMemo;
+	private volatile long prefsQueryAtMs;
 	private volatile long lastPanelRefreshMs;
 	private volatile long lastPanelOkMs;
 	/** Item currently open in the GE Buy/Sell setup (v0.8.4), -1 when none.
@@ -341,16 +358,81 @@ public class RuneFlipCompanionPlugin extends Plugin
 		String url = config.backendUrl();
 		String clientId = ensureClientId();
 		boolean assistedSetup = config.enableAssistedOfferSetup();
+
+		// Fresh cache (v0.8.10): re-opening the same item re-renders instantly.
+		String memoBase = prefsQueryMemo != null ? prefsQueryMemo : "";
+		RuneFlipData.FastFlipItemContextResponse cached = itemContextCache.get(
+			itemContextKey(itemId, overriddenQuery(memoBase)),
+			System.currentTimeMillis());
+		if (cached != null)
+		{
+			SwingUtilities.invokeLater(
+				() -> respectSelection(itemId, target, cached, assistedSetup));
+			return;
+		}
+
+		// Immediate feedback (v0.8.10): the card swaps to "Loading item
+		// context…" NOW; the fetch fills it in the background. A newer
+		// selection or strategy change makes this ticket stale.
+		SwingUtilities.invokeLater(target::showSelectedItemLoading);
+		long ticket = itemContextSeq.begin();
+		withBaseQuery(url, clientId, base ->
+		{
+			String query = overriddenQuery(base);
+			apiClient.fetchFastFlipItem(url, itemId, query, clientId,
+				res ->
+				{
+					if (!itemContextSeq.isCurrent(ticket))
+					{
+						return;
+					}
+					itemContextCache.put(itemContextKey(itemId, query), res,
+						System.currentTimeMillis());
+					SwingUtilities.invokeLater(
+						() -> respectSelection(itemId, target, res, assistedSetup));
+				},
+				() ->
+				{
+					if (!itemContextSeq.isCurrent(ticket))
+					{
+						return;
+					}
+					SwingUtilities.invokeLater(target::clearSelectedItem);
+				});
+		});
+	}
+
+	/** Cache key for one item context under one effective strategy. */
+	private static String itemContextKey(int itemId, String strategyQuery)
+	{
+		return itemId + "|" + strategyQuery;
+	}
+
+	/**
+	 * Runs an action with the saved-preferences base query (v0.8.10): served
+	 * from a 30s memo when fresh — so pill clicks and item selections skip the
+	 * prefs round-trip — otherwise fetched once and memoized. A failed fetch
+	 * degrades to the default strategy ("") without memoizing the failure.
+	 */
+	private void withBaseQuery(
+		String url, String clientId, java.util.function.Consumer<String> action)
+	{
+		String memo = prefsQueryMemo;
+		if (memo != null
+			&& System.currentTimeMillis() - prefsQueryAtMs < PREFS_QUERY_TTL_MS)
+		{
+			action.accept(memo);
+			return;
+		}
 		apiClient.fetchStrategyPreferences(url, clientId,
-			prefs -> apiClient.fetchFastFlipItem(url, itemId,
-				overriddenQuery(RuneFlipApiClient.strategyQueryOf(prefs)), clientId,
-				res -> SwingUtilities.invokeLater(
-					() -> respectSelection(itemId, target, res, assistedSetup)),
-				() -> SwingUtilities.invokeLater(target::clearSelectedItem)),
-			() -> apiClient.fetchFastFlipItem(url, itemId, overriddenQuery(""), clientId,
-				res -> SwingUtilities.invokeLater(
-					() -> respectSelection(itemId, target, res, assistedSetup)),
-				() -> SwingUtilities.invokeLater(target::clearSelectedItem)));
+			prefs ->
+			{
+				String query = RuneFlipApiClient.strategyQueryOf(prefs);
+				prefsQueryMemo = query;
+				prefsQueryAtMs = System.currentTimeMillis();
+				action.accept(query);
+			},
+			() -> action.accept(""));
 	}
 
 	/**
@@ -445,6 +527,10 @@ public class RuneFlipCompanionPlugin extends Plugin
 	 * pills store a LOCAL fetch preference (clicking the active pill clears
 	 * it) and re-fetch; reset clears the local session accounting. Nothing
 	 * here writes to the backend's saved preferences or touches the game.
+	 *
+	 * <p>Responsiveness (v0.8.10): the clicked pill highlights OPTIMISTICALLY
+	 * before any response ("Updating…" shows until it renders), and only the
+	 * Fast Flip card re-fetches — served from the short cache when fresh.
 	 */
 	private RuneFlipPanel.DesignActions designActions()
 	{
@@ -453,22 +539,38 @@ public class RuneFlipCompanionPlugin extends Plugin
 			@Override
 			public void onTimeframePill(int minutes)
 			{
-				int next = config.strategyTimeframeMinutes() == minutes
-					? 0 : minutes;
+				int current = config.strategyTimeframeMinutes();
 				configManager.setConfiguration(
 					RuneFlipCompanionConfig.GROUP,
-					"strategyTimeframeMinutes", next);
-				refreshPanel();
+					"strategyTimeframeMinutes",
+					current == minutes ? 0 : minutes);
+				Integer optimistic =
+					StrategyParams.optimisticTimeframe(current, minutes);
+				RuneFlipPanel target = panel;
+				if (target != null)
+				{
+					SwingUtilities.invokeLater(
+						() -> target.showStrategyPendingTimeframe(optimistic));
+				}
+				refreshFastFlip();
 			}
 
 			@Override
 			public void onRiskPill(String riskLevel)
 			{
-				String next = riskLevel.equals(config.strategyRiskLevel())
-					? "" : riskLevel;
+				String current = config.strategyRiskLevel();
 				configManager.setConfiguration(
-					RuneFlipCompanionConfig.GROUP, "strategyRiskLevel", next);
-				refreshPanel();
+					RuneFlipCompanionConfig.GROUP, "strategyRiskLevel",
+					riskLevel.equals(current) ? "" : riskLevel);
+				String optimistic =
+					StrategyParams.optimisticRisk(current, riskLevel);
+				RuneFlipPanel target = panel;
+				if (target != null)
+				{
+					SwingUtilities.invokeLater(
+						() -> target.showStrategyPendingRisk(optimistic));
+				}
+				refreshFastFlip();
 			}
 
 			@Override
@@ -522,9 +624,14 @@ public class RuneFlipCompanionPlugin extends Plugin
 				configManager.setConfiguration(
 					RuneFlipCompanionConfig.GROUP, "pairedAt",
 					Instant.now().toString());
-				// New identity: force a fresh snapshot/capital send.
+				// New identity: force a fresh snapshot/capital send, and drop
+				// the response caches — offer-aware actions and saved prefs
+				// belong to the new client id (v0.8.10).
 				lastSentFingerprint = null;
 				lastCapitalFingerprint = null;
+				overviewCache.clear();
+				itemContextCache.clear();
+				prefsQueryMemo = null;
 				log.info("RuneFlip Companion paired — adopted the dashboard's client id");
 				SwingUtilities.invokeLater(() ->
 				{
@@ -652,14 +759,11 @@ public class RuneFlipCompanionPlugin extends Plugin
 		pushSessionStats();
 
 		// The StrategyPill's local override (v0.8.7) is applied on top of the
-		// saved preferences — and still applies when the prefs fetch fails.
+		// saved preferences — served from the 30s memo when fresh (v0.8.10),
+		// and the default strategy applies when the prefs fetch fails.
 		boolean assistedSetup = config.enableAssistedOfferSetup();
-		apiClient.fetchStrategyPreferences(url, clientId,
-			prefs -> loadFastFlip(url,
-				overriddenQuery(RuneFlipApiClient.strategyQueryOf(prefs)),
-				clientId, assistedSetup, target),
-			() -> loadFastFlip(url, overriddenQuery(""),
-				clientId, assistedSetup, target));
+		withBaseQuery(url, clientId, base ->
+			loadFastFlip(url, overriddenQuery(base), clientId, assistedSetup, target));
 
 		apiClient.fetchCompletedAlerts(url, clientId,
 			response -> SwingUtilities.invokeLater(() -> target.updateCompleted(response)),
@@ -694,10 +798,30 @@ public class RuneFlipCompanionPlugin extends Plugin
 		boolean assistedSetup,
 		RuneFlipPanel target)
 	{
+		// Fresh cache (v0.8.10): pill toggles within the TTL re-render at once
+		// — no fetch, no flicker. The regular refresh cycle repopulates it.
+		RuneFlipData.FastFlipOverviewResponse cached =
+			overviewCache.get(strategyQuery, System.currentTimeMillis());
+		if (cached != null)
+		{
+			SwingUtilities.invokeLater(
+				() -> target.updateFastFlip(cached, assistedSetup));
+			return;
+		}
+
+		// Stale-response guard (v0.8.10): rapid Low→Med→High clicks issue new
+		// tickets; only the newest request's answer ever renders.
+		long ticket = overviewSeq.begin();
 		apiClient.fetchFastFlipOverview(url, strategyQuery, clientId,
 			response ->
 			{
+				if (!overviewSeq.isCurrent(ticket))
+				{
+					return;
+				}
 				logFastFlip(strategyQuery, response);
+				overviewCache.put(strategyQuery, response,
+					System.currentTimeMillis());
 				boolean matchedNothing = FastFlipSelection.select(
 					response, RuneFlipPanel.MAX_FAST_FLIP_ROWS).source
 					== FastFlipSelection.Source.NONE;
@@ -705,15 +829,29 @@ public class RuneFlipCompanionPlugin extends Plugin
 				{
 					// Saved strategy filtered everything: show the default-
 					// strategy ideas (labelled as such) instead of an empty box.
+					// Same ticket: a newer click also cancels this fallback.
 					apiClient.fetchFastFlipOverview(url, "", clientId,
 						fallback ->
 						{
+							if (!overviewSeq.isCurrent(ticket))
+							{
+								return;
+							}
 							logFastFlip("", fallback);
+							overviewCache.put("", fallback,
+								System.currentTimeMillis());
 							SwingUtilities.invokeLater(() ->
 								target.updateFastFlip(fallback, assistedSetup, true));
 						},
-						() -> SwingUtilities.invokeLater(() ->
-							target.updateFastFlip(response, assistedSetup, false)));
+						() ->
+						{
+							if (!overviewSeq.isCurrent(ticket))
+							{
+								return;
+							}
+							SwingUtilities.invokeLater(() ->
+								target.updateFastFlip(response, assistedSetup, false));
+						});
 					return;
 				}
 				SwingUtilities.invokeLater(
@@ -721,6 +859,10 @@ public class RuneFlipCompanionPlugin extends Plugin
 			},
 			() ->
 			{
+				if (!overviewSeq.isCurrent(ticket))
+				{
+					return;
+				}
 				logFastFlip(strategyQuery, null);
 				// Warn (not debug): this is the line that distinguishes a broken
 				// backend URL / network from a strategy that matched nothing.
@@ -732,6 +874,25 @@ public class RuneFlipCompanionPlugin extends Plugin
 				SwingUtilities.invokeLater(
 					() -> target.updateFastFlip(null, assistedSetup));
 			});
+	}
+
+	/**
+	 * Fast Flip-only refresh (v0.8.10), used by the strategy pills: skips the
+	 * recommendations/capital/alerts fetches a full panel refresh would also
+	 * fire, so the click's answer is one (or zero, on cache hit) round-trip.
+	 */
+	private void refreshFastFlip()
+	{
+		RuneFlipPanel target = panel;
+		if (target == null)
+		{
+			return;
+		}
+		String url = config.backendUrl();
+		String clientId = ensureClientId();
+		boolean assistedSetup = config.enableAssistedOfferSetup();
+		withBaseQuery(url, clientId, base ->
+			loadFastFlip(url, overriddenQuery(base), clientId, assistedSetup, target));
 	}
 
 	/**
