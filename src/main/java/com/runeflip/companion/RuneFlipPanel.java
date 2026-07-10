@@ -139,6 +139,10 @@ public class RuneFlipPanel extends PluginPanel
 	static final String GE_SUGGESTION_CHIP = "GE suggestion";
 	/** Short contextual-card footer (v0.8.5) — the compliance rule, compact. */
 	static final String SHORT_DISCLAIMER = "Review manually.";
+	/** Sell-context warning (v0.8.12): shown amber (zero) / red (negative)
+	 *  when the after-tax edge does not clear — never hides the card. */
+	static final String LOW_EDGE_WARNING =
+		"Low or negative edge after tax. Review manually.";
 	/** Fast Flip card footer (v0.8.5-c) — the compliance rule in one short line,
 	 *  wide enough that "never confirms trades" is unmistakable in the sidebar. */
 	static final String FAST_FLIP_FOOTER =
@@ -178,7 +182,7 @@ public class RuneFlipPanel extends PluginPanel
 	private static final int MAX_NAME_CHARS = 40;
 	/** Shown in the header next to the wordmark (v0.8.7 design). Must match
 	 *  build.gradle's version — pinned by RuneFlipPanelTextTest. */
-	static final String PLUGIN_VERSION = "0.8.11";
+	static final String PLUGIN_VERSION = "0.8.12";
 
 	/**
 	 * Pairing callbacks implemented by the plugin (v0.6.3). Both are
@@ -539,11 +543,21 @@ public class RuneFlipPanel extends PluginPanel
 	 * Shows the RuneFlip context for the item the user just opened in the GE
 	 * Buy/Sell setup. Display only: every price, comparison string and figure
 	 * comes verbatim from GET /fast-flip/item/:itemId — the plugin renders them
-	 * and never acts on the game. When the backend does not stand behind a
-	 * target (AVOID / not recommended / no data) it shows "No RuneFlip target
-	 * yet" plus Open Wiki, honestly.
+	 * and never acts on the game. When the backend does not stand behind the
+	 * targets the side needs (AVOID / not recommended / no data) it shows "No
+	 * RuneFlip target yet" plus Open Wiki, honestly — but a SELL setup with
+	 * sell targets available keeps the full card (v0.8.12): the player needs
+	 * them to CLOSE the flip they already opened.
 	 */
 	void updateSelectedItem(RuneFlipData.FastFlipItemContextResponse response)
+	{
+		updateSelectedItem(response, null);
+	}
+
+	/** Side-aware variant (v0.8.12): "BUY"/"SELL" from the GE setup varbit;
+	 *  null keeps the pre-v0.8.12 entry-side rendering. */
+	void updateSelectedItem(
+		RuneFlipData.FastFlipItemContextResponse response, String side)
 	{
 		selectedCard.removeAll();
 		if (response == null)
@@ -552,7 +566,7 @@ public class RuneFlipPanel extends PluginPanel
 			return;
 		}
 		this.hasSelection = true;
-		buildSelectedCard(response);
+		buildSelectedCard(response, side);
 		applyVisibility();
 	}
 
@@ -867,9 +881,18 @@ public class RuneFlipPanel extends PluginPanel
 	 * Display only, ending on "Review manually." The v0.8.3 Copy price/qty
 	 * block was removed in v0.8.10 — the game accepts no paste, so the buttons
 	 * were useless in real play.
+	 *
+	 * <p>Side-aware since v0.8.12: a SELL setup titles the card "· SELL", adds
+	 * the SELL section (safe/quick sell + tax + after-tax edge) and — the fix —
+	 * keeps the FULL card when recommended=false as long as sell targets exist,
+	 * because the player who already bought needs them to close the flip. A
+	 * low/negative after-tax edge shows an explicit amber/red warning instead
+	 * of hiding anything.
 	 */
-	private void buildSelectedCard(RuneFlipData.FastFlipItemContextResponse res)
+	private void buildSelectedCard(
+		RuneFlipData.FastFlipItemContextResponse res, String side)
 	{
+		selectedHeader.setText(selectedHeaderTitle(side));
 		// Head: icon + name + risk chip + confidence (all backend data).
 		JPanel head = new JPanel(new BorderLayout(8, 0));
 		head.setOpaque(false);
@@ -911,11 +934,15 @@ public class RuneFlipPanel extends PluginPanel
 		selectedCard.add(head);
 		selectedCard.add(Box.createVerticalStrut(7));
 
-		// Not recommended (AVOID / not recommended / no data): say so honestly.
-		String noTarget = noRuneFlipTargetLine(res);
-		if (noTarget != null)
+		// Not recommended (AVOID / not recommended / no data): say so honestly
+		// — UNLESS this is a SELL setup with sell targets available (v0.8.12):
+		// dropping to "No RuneFlip target yet" right when the player needs the
+		// sell target to close the flip was the real-play bug this fixes.
+		if (!showFullContextCard(res, side))
 		{
-			JLabel none = new JLabel(html(noTarget));
+			String noTarget = noRuneFlipTargetLine(res);
+			JLabel none = new JLabel(html(noTarget != null
+				? noTarget : safe(SHORT_DISCLAIMER)));
 			none.setFont(FontManager.getRunescapeSmallFont());
 			none.setAlignmentX(LEFT_ALIGNMENT);
 			selectedCard.add(none);
@@ -924,6 +951,19 @@ public class RuneFlipPanel extends PluginPanel
 			selectedCard.add(Box.createVerticalStrut(4));
 			selectedCard.add(shortDisclaimerLabel());
 			return;
+		}
+
+		// Full card despite recommended=false (sell side): the honest warning
+		// renders ABOVE the targets instead of replacing them.
+		if (!Boolean.TRUE.equals(res.recommended))
+		{
+			String reason = res.notRecommendedReason != null
+				&& !res.notRecommendedReason.trim().isEmpty()
+				? res.notRecommendedReason.trim()
+				: "The model does not stand behind the full flip right now.";
+			addSelectedLine("<span style='color:#e8a04a'>" + safe(reason)
+				+ "</span>");
+			selectedCard.add(Box.createVerticalStrut(6));
 		}
 
 		RuneFlipData.TargetComparison tc = res.targetComparison;
@@ -948,6 +988,22 @@ public class RuneFlipPanel extends PluginPanel
 				"Buy", gpOrDash(tc.targetBuy), GOLD, CHIP_GOLD_BG,
 				"Sell", gpOrDash(tc.targetSell), PROFIT, CHIP_GREEN_BG));
 			selectedCard.add(Box.createVerticalStrut(6));
+		}
+
+		// SELL (v0.8.12, sell setups only): safe/quick sell targets, tax and
+		// the after-tax edge — everything the player needs to close the flip.
+		if ("SELL".equals(side))
+		{
+			String sellTargets = sellTargetsLine(res.priceEdge);
+			String sellTax = sellTaxProfitLine(res.priceEdge);
+			if (sellTargets != null || sellTax != null)
+			{
+				selectedCard.add(sectionLabel("SELL"));
+				selectedCard.add(Box.createVerticalStrut(3));
+				addSelectedLine(sellTargets);
+				addSelectedLine(sellTax);
+				selectedCard.add(Box.createVerticalStrut(6));
+			}
 		}
 
 		// EDGE VS WIKI: the backend's buy/sell messages, verbatim bullets.
@@ -995,6 +1051,19 @@ public class RuneFlipPanel extends PluginPanel
 		profitRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
 		selectedCard.add(profitRow);
 		selectedCard.add(Box.createVerticalStrut(6));
+
+		// Low/negative after-tax edge (v0.8.12): an explicit warning — amber
+		// at zero, red when negative — instead of hiding the card.
+		if (showLowEdgeWarning(res))
+		{
+			JLabel warn = new JLabel(html(safe(LOW_EDGE_WARNING)));
+			warn.setFont(FontManager.getRunescapeSmallFont());
+			Long edge = edgeAfterTaxOf(res);
+			warn.setForeground(edge != null && edge < 0 ? RED : ALERT);
+			warn.setAlignmentX(LEFT_ALIGNMENT);
+			selectedCard.add(warn);
+			selectedCard.add(Box.createVerticalStrut(6));
+		}
 
 		// ACTION: chip + the backend's reason, verbatim + display-only.
 		String actionChipText = actionChipLabel(res.action);
@@ -1720,6 +1789,122 @@ public class RuneFlipPanel extends PluginPanel
 	}
 
 	// ── Context-aware GE item text (v0.8.4 — verbatim from the backend) ──────
+
+	// ── Sell-context retention (v0.8.12) — pure, unit-tested decisions ──────
+
+	/** Card header per setup side: "SELECTED GE ITEM · SELL" while selling,
+	 *  "· BUY" while buying, the plain title when the side is unknown. */
+	static String selectedHeaderTitle(String side)
+	{
+		if ("SELL".equals(side))
+		{
+			return "SELECTED GE ITEM · SELL";
+		}
+		if ("BUY".equals(side))
+		{
+			return "SELECTED GE ITEM · BUY";
+		}
+		return "SELECTED GE ITEM";
+	}
+
+	/**
+	 * Whether the FULL context card renders (v0.8.12). Recommended items
+	 * always do. A not-recommended response keeps the full card ONLY on the
+	 * SELL side and only when sell targets exist — the player who already
+	 * bought needs them to close the flip; the buy side keeps the honest
+	 * "No RuneFlip target yet" (never open a new flip on a rejected item).
+	 */
+	static boolean showFullContextCard(
+		RuneFlipData.FastFlipItemContextResponse res, String side)
+	{
+		if (res == null)
+		{
+			return false;
+		}
+		if (Boolean.TRUE.equals(res.recommended))
+		{
+			return true;
+		}
+		return "SELL".equals(side) && hasSellTargets(res);
+	}
+
+	/** Any usable sell target: comparison targetSell, or a recommended/safe/
+	 *  quick sell leg in the price edge. */
+	static boolean hasSellTargets(RuneFlipData.FastFlipItemContextResponse res)
+	{
+		if (res == null)
+		{
+			return false;
+		}
+		if (res.targetComparison != null && res.targetComparison.targetSell != null)
+		{
+			return true;
+		}
+		RuneFlipData.PriceEdge edge = res.priceEdge;
+		return edge != null
+			&& (edge.recommendedSellPrice != null
+				|| edge.safeSellPrice != null
+				|| edge.quickSellPrice != null);
+	}
+
+	/** "Safe sell 1,049 gp · Quick sell 1,020 gp" — the closing-leg targets;
+	 *  null when the edge block has neither. */
+	static String sellTargetsLine(RuneFlipData.PriceEdge edge)
+	{
+		if (edge == null
+			|| (edge.safeSellPrice == null && edge.quickSellPrice == null))
+		{
+			return null;
+		}
+		return "<span style='color:#878d9c'>Safe sell</span> "
+			+ gpOrDash(edge.safeSellPrice)
+			+ " <span style='color:#878d9c'>· Quick sell</span> "
+			+ gpOrDash(edge.quickSellPrice);
+	}
+
+	/** "Tax 21 gp · +5 gp/item after tax" — the closing-leg economics; the
+	 *  edge renders red when negative. Null when the block carries neither. */
+	static String sellTaxProfitLine(RuneFlipData.PriceEdge edge)
+	{
+		if (edge == null || (edge.tax == null && edge.profitPerItem == null))
+		{
+			return null;
+		}
+		StringBuilder sb = new StringBuilder();
+		sb.append("<span style='color:#878d9c'>Tax</span> ")
+			.append(gpOrDash(edge.tax));
+		if (edge.profitPerItem != null)
+		{
+			String color = edge.profitPerItem < 0 ? "#e06767" : "#4cba86";
+			sb.append(" <span style='color:").append(color).append("'>· ")
+				.append(profitPerItemLabel(edge.profitPerItem))
+				.append("/item after tax</span>");
+		}
+		return sb.toString();
+	}
+
+	/** After-tax edge per item: the price-edge figure, else the whole-flip
+	 *  expected profit; null when neither exists. */
+	static Long edgeAfterTaxOf(RuneFlipData.FastFlipItemContextResponse res)
+	{
+		if (res == null)
+		{
+			return null;
+		}
+		if (res.priceEdge != null && res.priceEdge.profitPerItem != null)
+		{
+			return res.priceEdge.profitPerItem;
+		}
+		return res.expectedProfit;
+	}
+
+	/** The LOW_EDGE_WARNING renders when the after-tax edge is known and does
+	 *  not clear zero. An unknown edge shows no warning (nothing invented). */
+	static boolean showLowEdgeWarning(RuneFlipData.FastFlipItemContextResponse res)
+	{
+		Long edge = edgeAfterTaxOf(res);
+		return edge != null && edge <= 0;
+	}
 
 	/**
 	 * "No RuneFlip target yet" line for a selected item the model does not stand

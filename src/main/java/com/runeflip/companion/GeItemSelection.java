@@ -52,4 +52,15 @@ public final class GeItemSelection
 	{
 		return selectedItemId(previousVarpValue) != selectedItemId(currentVarpValue);
 	}
+
+	/**
+	 * Maps the read-only GE_OFFER_CREATION_TYPE varbit (0 = buy setup,
+	 * 1 = sell setup) to the API's side param (v0.8.12). Pure observation —
+	 * the same safe signal family as the item varp; anything unexpected maps
+	 * to BUY, the pre-v0.8.12 default.
+	 */
+	public static String sideOf(int geOfferCreationType)
+	{
+		return geOfferCreationType == 1 ? "SELL" : "BUY";
+	}
 }

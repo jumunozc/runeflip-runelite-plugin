@@ -65,6 +65,19 @@ or session data; never receives commands from the backend.
   with no RuneFlip target show "No RuneFlip target yet" + Open Wiki. Requires a
   RuneFlip backend on **v0.8.4+** (`GET /fast-flip/item/:itemId`); against an
   older backend the panel keeps showing the Top 3.
+- **Sell-context retention (v0.8.12).** RuneFlip keeps sell context after a
+  buy so the player can close flips manually. The panel detects whether the
+  open GE setup is a **Buy or a Sell** (read-only `GE_OFFER_CREATION_TYPE`
+  varbit) and renders that side's context: a Sell setup is titled
+  **"SELECTED GE ITEM · SELL"** and shows wiki low/high, the RuneFlip sell
+  target, Safe/Quick sell, tax and the after-tax edge, ROI and the action
+  (Review sell / Hold / Avoid). The last context per item is retained
+  locally for ~30 minutes, so opening the Sell offer of a just-bought item
+  renders instantly while a sell-focused refresh
+  (`/fast-flip/item/:itemId?side=SELL`, backend v0.8.12+) runs in the
+  background. A not-recommended answer no longer hides the card when sell
+  targets exist — a low/negative after-tax edge shows *"Low or negative
+  edge after tax. Review manually."* (amber/red) instead.
 - **Capital sync (opt-in, OFF by default).** Optionally also reports
   inventory coins — and bank coins as *last seen* when **you** open the
   bank. Observation only; nothing is ever acted on.
@@ -185,7 +198,7 @@ yourself**:
 
 1. Build the jar (see **Build** above): `./gradlew clean test build` produces
    `build/libs/runeflip-companion-<version>.jar` (currently
-   `runeflip-companion-0.8.11.jar`).
+   `runeflip-companion-0.8.12.jar`).
 2. Copy that jar into RuneLite's sideloaded-plugins folder:
    - Windows: `%USERPROFILE%\.runelite\sideloaded-plugins\`
    - macOS / Linux: `~/.runelite/sideloaded-plugins/`
@@ -197,6 +210,22 @@ install only a jar you built (or trust). The default **Backend URL**
 (`https://runeflip-api.onrender.com/api`) points at the public RuneFlip
 service; point it at your own backend if you self-host.
 
+> **v0.8.12** (2026-07): sell-context retention — **RuneFlip keeps sell
+> context after a buy so the player can close flips manually.** In real play
+> the panel dropped to *"No RuneFlip target yet"* right after a buy filled
+> and the Sell offer of the same item was opened. Now the panel is
+> side-aware (read-only `GE_OFFER_CREATION_TYPE` varbit): a Sell setup shows
+> the sell-focused card ("SELECTED GE ITEM · SELL": wiki legs, sell target,
+> Safe/Quick sell, tax, after-tax edge, ROI, Review sell / Hold / Avoid), a
+> per-item context is retained locally ~30 min so buy→sell renders
+> instantly while `?side=SELL` refreshes in the background (backend
+> v0.8.12+, older backends degrade gracefully), and `recommended:false` no
+> longer hides the card when sell targets exist — a low/negative after-tax
+> edge shows an explicit amber/red warning instead. Read-only detection, no
+> compliance change. `gradlew clean test build` green (incl.
+> `FlipContextCacheTest`, `SellContextRetentionTest`, `ComplianceScanTest`),
+> jar emitted.
+>
 > **v0.8.11** (2026-07): Explicit GE Field Assist. New official rule:
 > **RuneFlip can prepare GE fields after explicit user action, but must
 > never submit or execute the offer.** While the matching GE editor is open,

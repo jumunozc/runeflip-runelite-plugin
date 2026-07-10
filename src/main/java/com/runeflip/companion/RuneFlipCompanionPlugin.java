@@ -138,6 +138,15 @@ public class RuneFlipCompanionPlugin extends Plugin
 	/** Item currently open in the GE Buy/Sell setup (v0.8.4), -1 when none.
 	 *  Read only from the GE-current-item VarPlayer — never OCR/input. */
 	private volatile int lastSelectedGeItem = -1;
+	/** Which side the open GE setup is ("BUY"/"SELL", v0.8.12) — read only
+	 *  from the GE_OFFER_CREATION_TYPE varbit. Drives the side-aware fetch
+	 *  and the buy→sell re-render of the same item. */
+	private volatile String lastSelectedSide = "BUY";
+	/** Active-flip retention (v0.8.12): last context per itemId for ~30 min,
+	 *  so the sell setup of a just-bought item renders instantly instead of
+	 *  losing the targets. Local display bookkeeping only. */
+	private final FlipContextCache flipContextCache =
+		new FlipContextCache(FlipContextCache.DEFAULT_TTL_MS);
 
 	// ── Explicit GE Field Assist (v0.8.11) ──────────────────────────────────
 	/** The ONLY writer of GE input fields; every write is click-gated and
@@ -323,13 +332,16 @@ public class RuneFlipCompanionPlugin extends Plugin
 	}
 
 	/**
-	 * Context-aware GE item detection (v0.8.4). Reads ONLY the read-only
-	 * "current GE item" VarPlayer to learn which item the user just opened in
-	 * the Buy/Sell setup — no OCR, no screen scraping, no synthetic input, no
-	 * widget mutation. When the selection changes, the panel swaps its Top-3
-	 * list for that item's RuneFlip context (fetched read-only); when the setup
-	 * closes it falls back to the Top-3. VarbitChanged is dispatched on the
-	 * client thread, so the var read here is safe. Display only.
+	 * Context-aware GE item detection (v0.8.4, side-aware since v0.8.12).
+	 * Reads ONLY two read-only signals: the "current GE item" VarPlayer and
+	 * the GE_OFFER_CREATION_TYPE varbit (buy vs sell setup) — no OCR, no
+	 * screen scraping, no synthetic input, no widget mutation. When the
+	 * selection OR the side changes, the panel swaps to that item's RuneFlip
+	 * context for that side (buy context while buying, sell context while
+	 * selling — the buy→sell flow of the same item re-renders instead of
+	 * being ignored); when the setup closes it falls back to the Top-3.
+	 * VarbitChanged is dispatched on the client thread, so the var reads here
+	 * are safe. Display only.
 	 */
 	@Subscribe
 	public void onVarbitChanged(VarbitChanged event)
@@ -340,18 +352,26 @@ public class RuneFlipCompanionPlugin extends Plugin
 		}
 		int current = GeItemSelection.selectedItemId(
 			client.getVarpValue(GeItemSelection.GE_CURRENT_ITEM_VARP));
-		if (current == lastSelectedGeItem)
+		String side = GeItemSelection.sideOf(
+			client.getVarbitValue(net.runelite.api.Varbits.GE_OFFER_CREATION_TYPE));
+		if (current == lastSelectedGeItem && side.equals(lastSelectedSide))
 		{
 			return;
 		}
+		boolean itemChanged = current != lastSelectedGeItem;
 		lastSelectedGeItem = current;
-		// The stored context belongs to the previous selection — drop it so
-		// the field assist can never offer another item's qty/price.
-		lastItemContext = null;
+		lastSelectedSide = side;
+		if (itemChanged)
+		{
+			// The stored context belongs to the previous ITEM — drop it so the
+			// field assist can never offer another item's qty/price. A side
+			// change of the SAME item keeps it: same item, still valid.
+			lastItemContext = null;
+		}
 		RuneFlipPanel target = panel;
 		if (current > 0)
 		{
-			fetchItemContext(current);
+			fetchItemContext(current, side);
 		}
 		else if (target != null)
 		{
@@ -440,12 +460,14 @@ public class RuneFlipCompanionPlugin extends Plugin
 	}
 
 	/**
-	 * Fetches GET /fast-flip/item/:itemId for the selected GE item and shows its
-	 * context, honoring this install's saved strategy preferences and forwarding
-	 * the anonymous client id (so the action is offer-aware). Any failure just
-	 * clears the context card — the Top-3 list stays. Display only.
+	 * Fetches GET /fast-flip/item/:itemId for the selected GE item and shows
+	 * its context — side-aware since v0.8.12 ("BUY"/"SELL" from the setup
+	 * varbit, forwarded as the `side` query so a sell setup gets the
+	 * sell-focused answer). Honors this install's saved strategy preferences
+	 * and forwards the anonymous client id (so the action is offer-aware).
+	 * Display only.
 	 */
-	private void fetchItemContext(int itemId)
+	private void fetchItemContext(int itemId, String side)
 	{
 		RuneFlipPanel target = panel;
 		if (target == null)
@@ -455,26 +477,38 @@ public class RuneFlipCompanionPlugin extends Plugin
 		String url = config.backendUrl();
 		String clientId = ensureClientId();
 
-		// Fresh cache (v0.8.10): re-opening the same item re-renders instantly.
+		// Fresh cache (v0.8.10): re-opening the same item+side re-renders
+		// instantly (the side is part of both the key and the query).
 		String memoBase = prefsQueryMemo != null ? prefsQueryMemo : "";
+		String memoQuery = withSideParam(overriddenQuery(memoBase), side);
 		RuneFlipData.FastFlipItemContextResponse cached = itemContextCache.get(
-			itemContextKey(itemId, overriddenQuery(memoBase)),
-			System.currentTimeMillis());
+			itemContextKey(itemId, memoQuery), System.currentTimeMillis());
 		if (cached != null)
 		{
 			SwingUtilities.invokeLater(
-				() -> respectSelection(itemId, target, cached));
+				() -> respectSelection(itemId, target, cached, side));
 			return;
 		}
 
-		// Immediate feedback (v0.8.10): the card swaps to "Loading item
-		// context…" NOW; the fetch fills it in the background. A newer
-		// selection or strategy change makes this ticket stale.
-		SwingUtilities.invokeLater(target::showSelectedItemLoading);
+		// Flip retention (v0.8.12): a just-bought item re-opened on the SELL
+		// side renders its retained context NOW (targets/qty/profit stay on
+		// screen); the side-aware refresh still runs below and replaces it.
+		// Only with nothing retained does the card show the loading state.
+		RuneFlipData.FastFlipItemContextResponse retained =
+			flipContextCache.get(itemId, System.currentTimeMillis());
+		if (retained != null)
+		{
+			SwingUtilities.invokeLater(
+				() -> respectSelection(itemId, target, retained, side));
+		}
+		else
+		{
+			SwingUtilities.invokeLater(target::showSelectedItemLoading);
+		}
 		long ticket = itemContextSeq.begin();
 		withBaseQuery(url, clientId, base ->
 		{
-			String query = overriddenQuery(base);
+			String query = withSideParam(overriddenQuery(base), side);
 			apiClient.fetchFastFlipItem(url, itemId, query, clientId,
 				res ->
 				{
@@ -485,7 +519,7 @@ public class RuneFlipCompanionPlugin extends Plugin
 					itemContextCache.put(itemContextKey(itemId, query), res,
 						System.currentTimeMillis());
 					SwingUtilities.invokeLater(
-						() -> respectSelection(itemId, target, res));
+						() -> respectSelection(itemId, target, res, side));
 				},
 				() ->
 				{
@@ -493,15 +527,29 @@ public class RuneFlipCompanionPlugin extends Plugin
 					{
 						return;
 					}
-					SwingUtilities.invokeLater(target::clearSelectedItem);
+					// A failed refresh never wipes a useful retained view —
+					// only clear when nothing was rendered for this item.
+					if (retained == null)
+					{
+						SwingUtilities.invokeLater(target::clearSelectedItem);
+					}
 				});
 		});
 	}
 
-	/** Cache key for one item context under one effective strategy. */
+	/** Cache key for one item context under one effective strategy+side. */
 	private static String itemContextKey(int itemId, String strategyQuery)
 	{
 		return itemId + "|" + strategyQuery;
+	}
+
+	/** Appends the offer side (v0.8.12) to a strategy query string. */
+	static String withSideParam(String strategyQuery, String side)
+	{
+		String param = "side=" + side;
+		return strategyQuery == null || strategyQuery.isEmpty()
+			? param
+			: strategyQuery + "&" + param;
 	}
 
 	/**
@@ -539,14 +587,16 @@ public class RuneFlipCompanionPlugin extends Plugin
 	private void respectSelection(
 		int itemId,
 		RuneFlipPanel target,
-		RuneFlipData.FastFlipItemContextResponse res)
+		RuneFlipData.FastFlipItemContextResponse res,
+		String side)
 	{
 		if (lastSelectedGeItem == itemId)
 		{
-			// Remembered for the field assist (v0.8.11): qty/price offers for
-			// the OPEN item come from this context. Read-only bookkeeping.
+			// Remembered for the field assist (v0.8.11) and retained for the
+			// buy→sell flow (v0.8.12). Read-only bookkeeping.
 			lastItemContext = res;
-			target.updateSelectedItem(res);
+			flipContextCache.put(itemId, res, System.currentTimeMillis());
+			target.updateSelectedItem(res, side);
 		}
 	}
 

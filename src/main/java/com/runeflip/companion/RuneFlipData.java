@@ -268,6 +268,9 @@ public final class RuneFlipData
 		public String itemName;
 		public String iconUrl;
 		public String priceCapturedAt;
+		/** Echo of the requested offer side ("BUY"/"SELL", v0.8.12); null on
+		 *  pre-v0.8.12 backends or when the request sent no side. */
+		public String side;
 		public Boolean recommended;
 		public String notRecommendedReason;
 		public PriceEdge priceEdge;
