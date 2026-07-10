@@ -13,10 +13,12 @@ import static org.junit.Assert.assertTrue;
 /**
  * Primary GE suggestion (v0.8.10). The FIRST row of the rendered Fast Flip
  * selection — and only it — is RuneFlip's primary suggestion for the user's
- * next manual GE search (Flipping-Copilot style, but display-only: no safe
- * RuneLite API exists to prepare the in-game search, so the chip writes
- * nothing into the game). The same patch removed the v0.8.3 Copy price/qty
- * buttons everywhere: the game accepts no paste, so they assisted nothing.
+ * next manual GE search (Flipping-Copilot style). The chip itself stays
+ * display-only; since v0.8.11 the #1 may additionally be PREPARED into the
+ * GE search, but only via the click-gated "RuneFlip: select …" option in
+ * GeFieldAssistService — never from the panel. The v0.8.10 patch also
+ * removed the v0.8.3 Copy price/qty buttons everywhere: the game accepts no
+ * paste, so they assisted nothing.
  */
 public class PrimaryGeSuggestionTest
 {

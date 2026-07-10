@@ -17,8 +17,10 @@ import net.runelite.api.GrandExchangeOffer;
 import net.runelite.api.InventoryID;
 import net.runelite.api.ItemContainer;
 import net.runelite.api.ItemID;
+import net.runelite.api.MenuAction;
 import net.runelite.api.events.GrandExchangeOfferChanged;
 import net.runelite.api.events.ItemContainerChanged;
+import net.runelite.api.events.MenuOpened;
 import net.runelite.api.events.VarbitChanged;
 import java.awt.image.BufferedImage;
 import javax.swing.SwingUtilities;
@@ -137,6 +139,17 @@ public class RuneFlipCompanionPlugin extends Plugin
 	 *  Read only from the GE-current-item VarPlayer — never OCR/input. */
 	private volatile int lastSelectedGeItem = -1;
 
+	// ── Explicit GE Field Assist (v0.8.11) ──────────────────────────────────
+	/** The ONLY writer of GE input fields; every write is click-gated and
+	 *  editor-validated inside the service. */
+	private GeFieldAssistService fieldAssist;
+	/** #1 of the last rendered Fast Flip selection — the single primary GE
+	 *  suggestion (v0.8.10). #2/#3 are never stored: they cannot assist. */
+	private volatile RuneFlipData.FastFlipItem primaryFlip;
+	/** Context of the item currently open in the GE setup (when fetched),
+	 *  used to source qty/price for that exact item. */
+	private volatile RuneFlipData.FastFlipItemContextResponse lastItemContext;
+
 	private final AtomicBoolean inFlight = new AtomicBoolean(false);
 	private final AtomicBoolean capitalInFlight = new AtomicBoolean(false);
 	private volatile long lastAttemptMs;
@@ -183,6 +196,7 @@ public class RuneFlipCompanionPlugin extends Plugin
 		ensureClientId();
 		apiClient = new RuneFlipApiClient(okHttpClient, gson);
 		sessionTracker = new SessionTracker(System.currentTimeMillis());
+		fieldAssist = new GeFieldAssistService(client);
 		if (config.panelEnabled())
 		{
 			panel = new RuneFlipPanel(
@@ -331,6 +345,9 @@ public class RuneFlipCompanionPlugin extends Plugin
 			return;
 		}
 		lastSelectedGeItem = current;
+		// The stored context belongs to the previous selection — drop it so
+		// the field assist can never offer another item's qty/price.
+		lastItemContext = null;
 		RuneFlipPanel target = panel;
 		if (current > 0)
 		{
@@ -340,6 +357,86 @@ public class RuneFlipCompanionPlugin extends Plugin
 		{
 			SwingUtilities.invokeLater(target::clearSelectedItem);
 		}
+	}
+
+	/**
+	 * Explicit GE Field Assist (v0.8.11) — the DISPLAY half. When the user
+	 * right-clicks while a GE editor is open, this adds a "RuneFlip: …" menu
+	 * OPTION for exactly one field of exactly the open item: select the #1
+	 * primary suggestion in the item search, or set that item's qty/price in
+	 * the chatbox editor. Adding an option is not an action — nothing happens
+	 * unless the USER clicks it, and the click lands in
+	 * {@link GeFieldAssistService}, which re-validates the editor and the
+	 * USER_CLICK source before preparing the value. It never submits,
+	 * confirms, cancels or collects; the official rule is: RuneFlip can
+	 * prepare GE fields after explicit user action, but must never submit or
+	 * execute the offer.
+	 */
+	@Subscribe
+	public void onMenuOpened(MenuOpened event)
+	{
+		GeFieldAssistService assist = fieldAssist;
+		if (assist == null || !config.enableGeFieldAssist())
+		{
+			return;
+		}
+
+		// GE item search: offer the #1 primary suggestion (never #2/#3).
+		RuneFlipData.FastFlipItem primary = primaryFlip;
+		if (assist.isItemSearchOpen())
+		{
+			if (primary != null && primary.itemName != null)
+			{
+				String name = primary.itemName;
+				addAssistOption(GeFieldAssist.selectLabel(name), () ->
+					assist.prepareItemSearch(
+						name, GeFieldAssist.ActionSource.USER_CLICK));
+			}
+			return;
+		}
+
+		// Qty/price chatbox editor: only for the item the user has OPEN.
+		if (!assist.isValueEditorOpen())
+		{
+			return;
+		}
+		GeFieldAssist.Field field =
+			GeFieldAssist.fieldForPrompt(assist.chatboxPrompt());
+		int openItem = lastSelectedGeItem;
+		if (field == GeFieldAssist.Field.QUANTITY)
+		{
+			Long qty = GeFieldAssist.qtyFor(openItem, lastItemContext, primary);
+			if (qty != null)
+			{
+				long value = qty;
+				addAssistOption(GeFieldAssist.qtyLabel(value), () ->
+					assist.prepareQuantity(
+						value, GeFieldAssist.ActionSource.USER_CLICK));
+			}
+		}
+		else if (field == GeFieldAssist.Field.PRICE)
+		{
+			Long price = GeFieldAssist.priceFor(
+				openItem, assist.isSellOffer(), lastItemContext, primary);
+			if (price != null)
+			{
+				long value = price;
+				addAssistOption(GeFieldAssist.priceLabel(value), () ->
+					assist.preparePrice(
+						value, GeFieldAssist.ActionSource.USER_CLICK));
+			}
+		}
+	}
+
+	/** One "RuneFlip: …" menu option. The consumer runs only on the user's
+	 *  own click on that option (client thread), never programmatically. */
+	private void addAssistOption(String label, Runnable onUserClick)
+	{
+		client.getMenu().createMenuEntry(-1)
+			.setOption(label)
+			.setTarget("")
+			.setType(MenuAction.RUNELITE)
+			.onClick(entry -> onUserClick.run());
 	}
 
 	/**
@@ -446,6 +543,9 @@ public class RuneFlipCompanionPlugin extends Plugin
 	{
 		if (lastSelectedGeItem == itemId)
 		{
+			// Remembered for the field assist (v0.8.11): qty/price offers for
+			// the OPEN item come from this context. Read-only bookkeeping.
+			lastItemContext = res;
 			target.updateSelectedItem(res);
 		}
 	}
@@ -797,6 +897,7 @@ public class RuneFlipCompanionPlugin extends Plugin
 			overviewCache.get(strategyQuery, System.currentTimeMillis());
 		if (cached != null)
 		{
+			rememberPrimary(cached);
 			SwingUtilities.invokeLater(
 				() -> target.updateFastFlip(cached));
 			return;
@@ -833,6 +934,7 @@ public class RuneFlipCompanionPlugin extends Plugin
 							logFastFlip("", fallback);
 							overviewCache.put("", fallback,
 								System.currentTimeMillis());
+							rememberPrimary(fallback);
 							SwingUtilities.invokeLater(() ->
 								target.updateFastFlip(fallback, true));
 						},
@@ -842,11 +944,13 @@ public class RuneFlipCompanionPlugin extends Plugin
 							{
 								return;
 							}
+							rememberPrimary(response);
 							SwingUtilities.invokeLater(() ->
 								target.updateFastFlip(response, false));
 						});
 					return;
 				}
+				rememberPrimary(response);
 				SwingUtilities.invokeLater(
 					() -> target.updateFastFlip(response));
 			},
@@ -864,9 +968,23 @@ public class RuneFlipCompanionPlugin extends Plugin
 					BackendUrl.normalize(url),
 					strategyQuery == null || strategyQuery.isEmpty()
 						? "default" : strategyQuery);
+				rememberPrimary(null);
 				SwingUtilities.invokeLater(
 					() -> target.updateFastFlip(null));
 			});
+	}
+
+	/**
+	 * Remembers the #1 of the selection the panel is about to render — the
+	 * single primary GE suggestion (v0.8.10) and the only Top-3 entry the
+	 * field assist (v0.8.11) may ever offer. Empty/offline selections clear
+	 * it, so a stale #1 can never be offered.
+	 */
+	private void rememberPrimary(RuneFlipData.FastFlipOverviewResponse response)
+	{
+		FastFlipSelection selection =
+			FastFlipSelection.select(response, RuneFlipPanel.MAX_FAST_FLIP_ROWS);
+		primaryFlip = selection.rows.isEmpty() ? null : selection.rows.get(0);
 	}
 
 	/**

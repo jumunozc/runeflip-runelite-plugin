@@ -134,6 +134,27 @@ public interface RuneFlipCompanionConfig extends Config
 		return true;
 	}
 
+	/**
+	 * Explicit GE Field Assist (v0.8.11), ON by default. Adds "RuneFlip: …"
+	 * right-click menu OPTIONS while a GE editor is open: select the #1
+	 * suggestion in the item search, or set the open item's suggested
+	 * quantity/price in the chatbox editor. Rule: RuneFlip can prepare GE
+	 * fields after explicit user action, but must never submit or execute
+	 * the offer — every option only acts on the user's own click, the write
+	 * is a pending-input prepare ({@link GeFieldAssistService}), and nothing
+	 * ever confirms, cancels or collects.
+	 */
+	@ConfigItem(
+		keyName = "enableGeFieldAssist",
+		name = "GE field assist",
+		description = "Add right-click 'RuneFlip: select/set qty/set price' options while a GE editor is open. Prepares the typed value only, after your explicit click — you still press Enter and confirm every offer yourself. Never submits, cancels or collects.",
+		position = 15
+	)
+	default boolean enableGeFieldAssist()
+	{
+		return true;
+	}
+
 	@Range(min = 30)
 	@ConfigItem(
 		keyName = "panelRefreshSeconds",

@@ -7,6 +7,8 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.junit.Test;
@@ -16,34 +18,39 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 /**
- * Anti-bot compliance guard (v0.8.4). RuneFlip may assist input, but never
- * execute intent. This test SCANS the plugin's own source (comments stripped so
- * prose that merely explains why an API is forbidden does not trip it) and
- * fails if any code path could act on the game client:
+ * Anti-bot compliance guard. Official rule since v0.8.11: <b>RuneFlip can
+ * prepare GE fields after explicit user action, but must never submit or
+ * execute the offer.</b> This test SCANS the plugin's own source (comments
+ * stripped so prose that merely explains an API does not trip it) and fails
+ * if any code path could act on the game client:
  *
  *   (d) no OCR / screenshot / screen scraping;
- *   (e) no confirm / buy / sell / cancel / collect — i.e. none of the
- *       synthetic-input, menu-invocation or widget/var mutation APIs those
- *       would require;
- *   (f) no in-game GE field setup — the research finding is "Absent — no safe
- *       API", so the code must contain no synthetic-input mechanism to fill it.
+ *   (e) no confirm / buy / sell / cancel / abort / collect — i.e. none of
+ *       the synthetic-input, menu-invocation or server-state mutation APIs
+ *       those would require, anywhere;
+ *   (f) the ONLY game writes allowed are the pending-input prepares in
+ *       {@link GeFieldAssistService} (v0.8.11): {@code setVarcStrValue} +
+ *       {@code runScript} are forbidden in every other file, and inside the
+ *       service they may only redraw the input being prepared — never run
+ *       any other client script.
  *
- * The context-aware GE panel (v0.8.4) is allowed exactly ONE game touch-point:
- * READING the current-GE-item VarPlayer via getVarpValue — asserted present so
- * the feature stays wired to the safe, read-only signal and nothing else.
+ * The context-aware GE panel (v0.8.4) keeps its one read touch-point:
+ * READING the current-GE-item VarPlayer via getVarpValue — asserted present
+ * so the feature stays wired to the safe, read-only signal.
  */
 public class ComplianceScanTest
 {
 	/**
-	 * Forbidden mechanisms. Each would let the plugin drive the client — none
-	 * may appear in real code. Kept as method/class-name fragments so the scan
-	 * catches invocations regardless of the receiver.
+	 * Forbidden mechanisms — in EVERY file, the assist service included. Each
+	 * would let the plugin drive the client (input automation, menu
+	 * invocation, server-visible var writes, OCR/screen scraping). Kept as
+	 * method/class-name fragments so the scan catches invocations regardless
+	 * of the receiver.
 	 */
-	private static final String[] FORBIDDEN = {
-		// Synthetic input / scripting into the client.
-		"setVarcStrValue", "setVarcIntValue", "runScript",
-		"invokeMenuAction", "menuAction(", "setVarbit", "setVarpValue",
-		"setVarp(", "setVarbitValue",
+	private static final String[] FORBIDDEN_EVERYWHERE = {
+		// Synthetic input / menu invocation / server-state mutation.
+		"setVarcIntValue", "invokeMenuAction", "menuAction(",
+		"setVarbit", "setVarpValue", "setVarp(", "setVarbitValue",
 		// Keyboard / mouse automation.
 		"java.awt.Robot", "Robot(", "KeyEvent", "MouseEvent",
 		"keyPress", "keyRelease", "mousePress", "mouseMove", "dispatchEvent",
@@ -51,6 +58,16 @@ public class ComplianceScanTest
 		"createScreenCapture", "getBufferedImageProvider", "drawManager",
 		"DrawManager", "ImageCapture", "Tesseract", "screenshot", "getCanvas",
 	};
+
+	/**
+	 * Field-prepare writes (v0.8.11): allowed ONLY inside the assist service,
+	 * where they are click-gated and editor-validated. Anywhere else fails.
+	 */
+	private static final String[] FIELD_WRITE_TOKENS = {
+		"setVarcStrValue", "runScript",
+	};
+
+	private static final String ASSIST_SERVICE = "GeFieldAssistService.java";
 
 	@Test
 	public void pluginSourceContainsNoGameActingApis() throws IOException
@@ -63,19 +80,72 @@ public class ComplianceScanTest
 		{
 			String code = stripComments(
 				new String(Files.readAllBytes(source), StandardCharsets.UTF_8));
-			for (String token : FORBIDDEN)
+			for (String token : FORBIDDEN_EVERYWHERE)
 			{
 				if (code.contains(token))
 				{
 					violations.add(source.getFileName() + " → " + token);
 				}
 			}
+			if (source.getFileName().toString().equals(ASSIST_SERVICE))
+			{
+				continue;
+			}
+			for (String token : FIELD_WRITE_TOKENS)
+			{
+				if (code.contains(token))
+				{
+					violations.add(source.getFileName() + " → " + token
+						+ " (allowed only in " + ASSIST_SERVICE + ")");
+				}
+			}
 		}
 		if (!violations.isEmpty())
 		{
 			fail("Forbidden game-acting API(s) found in plugin code (RuneFlip "
-				+ "may assist input, never execute intent): " + violations);
+				+ "prepares fields only after an explicit user click, and only "
+				+ "inside GeFieldAssistService; it never executes intent): "
+				+ violations);
 		}
+	}
+
+	/**
+	 * The assist service must BE the encapsulation the rule demands: the
+	 * click-source gate present, the writes wired, the official rule
+	 * documented — and the ONLY client script it ever runs is the redraw of
+	 * the input line being prepared. Any other ScriptID would mean a script
+	 * that does something (submit, search, confirm) instead of a redraw.
+	 */
+	@Test
+	public void fieldWritesAreClickGatedInsideTheAssistService() throws IOException
+	{
+		String raw = read(ASSIST_SERVICE);
+		String code = stripComments(raw);
+
+		assertTrue("the service must actually hold the prepare writes",
+			code.contains("setVarcStrValue") && code.contains("runScript"));
+		assertTrue("every prepare must pass the USER_CLICK + editor gate",
+			code.contains("GeFieldAssist.canPrepare(source,"));
+		assertTrue("the official rule must be documented at the writer",
+			raw.contains("must never submit or execute the offer"));
+
+		Matcher scripts = Pattern.compile("ScriptID\\.[A-Z_]+").matcher(code);
+		while (scripts.find())
+		{
+			assertEquals("the service may only redraw the prepared input",
+				"ScriptID.CHAT_TEXT_INPUT_REBUILD", scripts.group());
+		}
+	}
+
+	/** Every prepare call site must pass USER_CLICK — never AUTOMATIC. */
+	@Test
+	public void assistCallSitesUseTheUserClickSourceOnly() throws IOException
+	{
+		String plugin = stripComments(read("RuneFlipCompanionPlugin.java"));
+		assertTrue("the plugin must invoke the assist via USER_CLICK",
+			plugin.contains("GeFieldAssist.ActionSource.USER_CLICK"));
+		assertTrue("nothing may ever pass the AUTOMATIC source",
+			!plugin.contains("ActionSource.AUTOMATIC"));
 	}
 
 	@Test
@@ -94,28 +164,27 @@ public class ComplianceScanTest
 	}
 
 	@Test
-	public void inGameSetupStaysDisabledAsAbsentNoSafeApi() throws IOException
+	public void legacySearchButtonStaysDisabled() throws IOException
 	{
-		// (f) The in-game GE search prefill remains DISABLED — the documented
-		// "Absent — no safe API" conclusion. The rationale comment must survive.
+		// The legacy dashboard's "Search item" button stays DISABLED: the
+		// supported in-game path is the click-gated "RuneFlip: select …" menu
+		// option (v0.8.11), never a panel-side write. The rationale comment
+		// must survive.
 		String panel = read("RuneFlipPanel.java");
-		assertTrue("the in-game search affordance must stay disabled",
+		assertTrue("the legacy search affordance must stay disabled",
 			panel.contains("disabledSearchButton"));
-		assertTrue("the no-safe-API rationale must remain documented",
+		assertTrue("the synthetic-input rationale must remain documented",
 			panel.contains("synthetic input"));
 	}
 
 	@Test
-	public void primaryGeSearchAssistStaysBlockedAndDocumented() throws IOException
+	public void explicitFieldAssistRuleIsDocumented() throws IOException
 	{
-		// v0.8.10: the primary GE suggestion is a display-only chip. The
-		// investigation's conclusion (previous-search / search-prepare /
-		// search-suggest all require setVarcStrValue + runScript / widget
-		// mutation / synthetic input) must stay documented at the chip, so
-		// nobody "finishes" the feature with a forbidden write path.
-		String panel = read("RuneFlipPanel.java");
-		assertTrue("the blocked conclusion must remain documented",
-			panel.contains("Primary GE Search Assist blocked — no safe API found"));
+		// The v0.8.11 official rule must stay written at both halves of the
+		// feature: the menu-option display (plugin) and the writer (service).
+		String rule = "prepare GE fields after explicit user action";
+		assertTrue(read("RuneFlipCompanionPlugin.java").contains(rule));
+		assertTrue(read(ASSIST_SERVICE).contains(rule));
 	}
 
 	// ── helpers ──────────────────────────────────────────────────────────────

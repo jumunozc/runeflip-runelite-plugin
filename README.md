@@ -34,13 +34,22 @@ or session data; never receives commands from the backend.
   trade actions, no overlays, and nothing that clicks, types or guides input
   in the game client. (The old Copy price / Copy qty buttons were removed in
   v0.8.10: the game accepts no paste, so they assisted nothing.)
-- **Primary GE suggestion (v0.8.10, display-only).** The **#1** item of the
-  Fast Flip list is always marked as the single primary suggestion for your
-  next manual GE search — a gold border plus a compact **"GE suggestion"**
+- **Primary GE suggestion (v0.8.10, display-only chip).** The **#1** item of
+  the Fast Flip list is always marked as the single primary suggestion for
+  your next GE search — a gold border plus a compact **"GE suggestion"**
   chip, Flipping-Copilot style. #2/#3 stay informational and cannot be
-  selected as the suggestion. The chip is not a button: RuneLite exposes no
-  safe API to prepare the in-game GE search (see Compliance below), so you
-  read the chip and type the search yourself.
+  selected as the suggestion.
+- **Explicit GE Field Assist (v0.8.11, click-gated).** New official rule:
+  **RuneFlip can prepare GE fields after explicit user action, but must
+  never submit or execute the offer.** While the matching GE editor is open,
+  right-clicking shows compact options — `RuneFlip: select <item>` (the #1
+  suggestion, in the item search), `RuneFlip: set qty <qty>` and
+  `RuneFlip: set price <price> gp` (for the item you have open; buy offers
+  get the buy target, sell offers the sell target). Clicking one prepares
+  the pending typed value — exactly as if you had typed it — and prints
+  *"RuneFlip prepared the value. Review manually."* You still press Enter,
+  still review, and still confirm every offer yourself. Toggle:
+  **GE field assist** (on by default; nothing happens without your click).
 - **Context-aware GE panel (v0.8.4, focused in v0.8.5, display-only).** When you
   open an item in the Grand Exchange Buy/Sell setup, the panel shows *that
   item's* RuneFlip context: Wiki **low/high** legs, safe/quick/recommended
@@ -74,6 +83,7 @@ Open RuneLite → Configuration → **RuneFlip Companion**:
 | Capital sync (observation) | Opt-in coins reporting described above. | **off** |
 | Sidebar panel | Show the informational panel. | on |
 | Context-aware GE panel | When you open an item in the GE setup, show a focused view: that item's RuneFlip context (wiki vs targets, action, ROI) or, with none open, the Top 3 — hiding the legacy dashboard and GE completed. Reads only the selected item id — never OCR, screen scraping or input. Off = full legacy panel. | on |
+| GE field assist | Add right-click "RuneFlip: select / set qty / set price" options while a GE editor is open (v0.8.11). Prepares the typed value only, after your explicit click — you still press Enter and confirm every offer yourself. Never submits, cancels or collects. | on |
 | Panel refresh (seconds) | Panel re-fetch cadence while open. | 60 (min 30) |
 
 The plugin also generates a random anonymous client id (a UUID) the first
@@ -118,7 +128,14 @@ observation-only contract:
 - No game actions of any kind — never buys, sells, cancels, collects or
   confirms offers, automatically or otherwise; no flipping loops.
 - No synthetic input — no `Robot`, no mouse/keyboard events, no menu
-  invocation, no client scripts, no writing into the chatbox or GE search.
+  invocation. The ONE permitted write (v0.8.11) is the click-gated field
+  prepare in `GeFieldAssistService`: it sets the pending chatbox input text
+  (as if you had typed it) after your explicit click on a "RuneFlip: …"
+  option, in a verified GE editor, and runs only the input-redraw script —
+  a build-time scan forbids those APIs in every other file and any other
+  client script even there.
+- No acting without human input — every assist is a menu OPTION; nothing
+  runs until you click it, and nothing can run in the background.
 - No OCR, screenshots, screen or pixel reading — data comes exclusively
   from the official RuneLite plugin API.
 - No credential access — it runs inside your already-authenticated client
@@ -126,24 +143,25 @@ observation-only contract:
 - One-way traffic — the backend can only answer with an HTTP status code;
   there is no way for it to command the plugin.
 
-The panel's "Search item" button is intentionally **disabled**: there is no
-safe, client-supported way to prefill the in-game GE search without
-synthetic input, so the supported flow is **Copy name** + typing it
-yourself in the official client. The context-aware GE panel (v0.8.4) is the
-same story from the other side: it only **reads** which item you have open
-(the current-GE-item VarPlayer) to pick what to display — it never fills a
-field, and a build-time `ComplianceScanTest` fails if any game-acting API
-(`setVarcStrValue`/`runScript`/`invokeMenuAction`/`KeyEvent`/`Robot`/
-screenshot/…) ever appears in the plugin source.
+The panel's legacy "Search item" button stays **disabled**: a panel-side
+button cannot verify the GE editor at the moment of the click. The
+supported path is the in-game one — with the GE search open, right-click
+and choose **"RuneFlip: select …"** (v0.8.11). The context-aware GE panel
+(v0.8.4) only **reads** which item you have open (the current-GE-item
+VarPlayer) to pick what to display.
 
-**Primary GE Search Assist blocked — no safe API found (v0.8.10).** The
-primary "GE suggestion" chip is deliberately display-only. The v0.8.10
-investigation re-confirmed that every route to surface the #1 item inside
-the in-game GE search — setting the "previous search" item, preparing the
-search chatbox, or injecting a result — requires `setVarcStrValue` +
-`runScript`, widget mutation or synthetic input, all forbidden by this
-contract and rejected at build time by `ComplianceScanTest`. No write path
-exists; the plugin never sets a price or quantity either.
+**Explicit GE Field Assist — how the write is contained (v0.8.11).**
+`GeFieldAssistService` is the single class allowed to touch a game input,
+and a build-time `ComplianceScanTest` enforces the whole posture: input
+automation, menu invocation, server-var writes and OCR APIs
+(`invokeMenuAction`/`KeyEvent`/`Robot`/screenshot/…) are forbidden in
+**every** file; `setVarcStrValue`/`runScript` are forbidden **outside** the
+service; and inside it the only script ever referenced must be the
+input-redraw one (`CHAT_TEXT_INPUT_REBUILD`). Every prepare requires the
+`USER_CLICK` action source (automatic/background execution is rejected) and
+a verified open editor, offers only the #1 primary suggestion (item) or the
+item you actually have open (qty/price), and never confirms, submits,
+cancels, aborts or collects.
 
 ## Build
 
@@ -167,7 +185,7 @@ yourself**:
 
 1. Build the jar (see **Build** above): `./gradlew clean test build` produces
    `build/libs/runeflip-companion-<version>.jar` (currently
-   `runeflip-companion-0.8.10.jar`).
+   `runeflip-companion-0.8.11.jar`).
 2. Copy that jar into RuneLite's sideloaded-plugins folder:
    - Windows: `%USERPROFILE%\.runelite\sideloaded-plugins\`
    - macOS / Linux: `~/.runelite/sideloaded-plugins/`
@@ -179,6 +197,21 @@ install only a jar you built (or trust). The default **Backend URL**
 (`https://runeflip-api.onrender.com/api`) points at the public RuneFlip
 service; point it at your own backend if you self-host.
 
+> **v0.8.11** (2026-07): Explicit GE Field Assist. New official rule:
+> **RuneFlip can prepare GE fields after explicit user action, but must
+> never submit or execute the offer.** While the matching GE editor is open,
+> right-click for `RuneFlip: select <item>` (the #1 primary suggestion, in
+> the item search), `RuneFlip: set qty <qty>` and `RuneFlip: set price
+> <price> gp` (open item only; buy offers use the buy target, sell offers
+> the sell target). A click prepares the pending typed value — as if you had
+> typed it — and prints *"RuneFlip prepared the value. Review manually."*;
+> you still press Enter and confirm every offer yourself. The write is
+> contained in `GeFieldAssistService` (the only file allowed to hold
+> `setVarcStrValue`/`runScript`, scan-enforced; `USER_CLICK` + verified
+> editor required; only the input-redraw script permitted). New **GE field
+> assist** toggle (on). `gradlew clean test build` green (incl. the reworked
+> `ComplianceScanTest` and the new `GeFieldAssistTest`), jar emitted.
+>
 > **v0.8.10** (2026-07): primary GE suggestion + Copy price/qty removal +
 > responsiveness (this release supersedes the earlier v0.8.10 preview tag,
 > which carried the responsiveness work alone).

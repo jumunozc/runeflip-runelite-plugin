@@ -128,17 +128,13 @@ public class RuneFlipPanel extends PluginPanel
 	 * suggestion for the user's next manual GE search, Flipping-Copilot style;
 	 * #2/#3 stay informational and are never selectable as a suggestion.
 	 *
-	 * <p><b>Primary GE Search Assist blocked — no safe API found.</b> The chip
-	 * is deliberately DISPLAY-ONLY. Research (v0.8.10, re-confirming the v0.6
-	 * finding): RuneLite exposes no safe, client-supported API to (a) set the
-	 * GE search "previous search" item, (b) prepare the GE search chatbox, or
-	 * (c) surface an item inside the GE search results. Every known path —
-	 * RuneLite's own GrandExchangePlugin included — goes through
-	 * {@code setVarcStrValue(VarClientStr.INPUT_TEXT, …)} plus
-	 * {@code runScript}, widget mutation, or synthetic input, all of which the
-	 * no-botting contract (and ComplianceScanTest) forbids. So the user reads
-	 * the chip and types the search manually in the official client; nothing
-	 * is written into the game.
+	 * <p>The chip itself is DISPLAY-ONLY. Since v0.8.11 the #1 can also be
+	 * prepared into the in-game GE item search — but only through the
+	 * "RuneFlip: select …" right-click option and only on the user's explicit
+	 * click, encapsulated in {@link GeFieldAssistService} (official rule:
+	 * RuneFlip can prepare GE fields after explicit user action, but must
+	 * never submit or execute the offer). The panel writes nothing into the
+	 * game.
 	 */
 	static final String GE_SUGGESTION_CHIP = "GE suggestion";
 	/** Short contextual-card footer (v0.8.5) — the compliance rule, compact. */
@@ -182,7 +178,7 @@ public class RuneFlipPanel extends PluginPanel
 	private static final int MAX_NAME_CHARS = 40;
 	/** Shown in the header next to the wordmark (v0.8.7 design). Must match
 	 *  build.gradle's version — pinned by RuneFlipPanelTextTest. */
-	static final String PLUGIN_VERSION = "0.8.10";
+	static final String PLUGIN_VERSION = "0.8.11";
 
 	/**
 	 * Pairing callbacks implemented by the plugin (v0.6.3). Both are
@@ -1247,9 +1243,9 @@ public class RuneFlipPanel extends PluginPanel
 	 * — and only — the FIRST rendered row of the current selection, whichever
 	 * list it came from (Top ranking or the "General ideas" fallback). #2/#3
 	 * are informational and can never be picked as a suggestion; the empty and
-	 * offline states have no suggestion at all. Display-only: the marked item
-	 * is what the user searches manually in the official GE — see
-	 * {@link #GE_SUGGESTION_CHIP} for why no in-game assist exists.
+	 * offline states have no suggestion at all. The same rule feeds the
+	 * plugin's field assist (v0.8.11): only this #1 may ever be offered as the
+	 * click-gated "RuneFlip: select …" option — see {@link #GE_SUGGESTION_CHIP}.
 	 */
 	static boolean isPrimaryGeSuggestion(FastFlipSelection.Source source, int rank)
 	{
@@ -1494,8 +1490,9 @@ public class RuneFlipPanel extends PluginPanel
 		entry.add(Box.createVerticalStrut(3));
 
 		// Primary GE suggestion chip (v0.8.10) — DISPLAY ONLY. The chip marks
-		// what to search manually; it is not a button and writes nothing into
-		// the game (see GE_SUGGESTION_CHIP: no safe GE-search API exists).
+		// the one item to search; it is not a button and the panel writes
+		// nothing into the game. The in-game "RuneFlip: select …" option
+		// (v0.8.11, GeFieldAssistService) is where a click may prepare it.
 		if (primary)
 		{
 			JPanel suggestionRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
@@ -1503,9 +1500,11 @@ public class RuneFlipPanel extends PluginPanel
 			suggestionRow.setAlignmentX(LEFT_ALIGNMENT);
 			JLabel suggestionChip = chip(GE_SUGGESTION_CHIP, GOLD, CHIP_GOLD_BG);
 			suggestionChip.setToolTipText(
-				"<html>RuneFlip's primary suggestion — search this item "
-					+ "manually in the GE.<br>RuneFlip never fills, searches or "
-					+ "confirms anything for you.</html>");
+				"<html>RuneFlip's primary suggestion — search this item in the "
+					+ "GE.<br>Tip: right-click while the GE search is open for "
+					+ "“RuneFlip: select …” (prepares the text "
+					+ "only).<br>RuneFlip never submits or confirms anything "
+					+ "for you.</html>");
 			suggestionRow.add(suggestionChip);
 			suggestionRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 18));
 			entry.add(suggestionRow);
@@ -2006,31 +2005,26 @@ public class RuneFlipPanel extends PluginPanel
 	}
 
 	/**
-	 * The requested "Search item" affordance, kept DISABLED on purpose.
+	 * The legacy "Search item" affordance, kept DISABLED on purpose.
 	 *
-	 * <p>Research finding (RuneLite {@code GrandExchangePlugin}, Plugin Hub
-	 * flipping tools): RuneLite exposes no <em>safe, client-supported</em> way
-	 * to place an item name into the <b>in-game</b> GE search box. Its own
-	 * {@code search(name)} opens RuneLite's sidebar price lookup, not the game
-	 * widget; prefilling the real search requires
-	 * {@code client.setVarcStrValue(VarClientStr.INPUT_TEXT, …)} plus a client
-	 * script — synthetic input into the game client. That is exactly what
-	 * RuneFlip's no-automation contract forbids (no synthetic input, no
-	 * keyboard automation, no widget mutation that drives the client).
-	 *
-	 * <p>So the button stays disabled with an explanatory tooltip; the working
-	 * manual path is "Copy name" + the user typing it in the official client.
-	 * If a genuinely safe public API ever appears, wire it here — user-click
-	 * only, item name only, never selection/price/quantity/offer/submit.
+	 * <p>Historic research finding (v0.6, RuneLite {@code GrandExchangePlugin},
+	 * Plugin Hub flipping tools): prefilling the in-game GE search requires
+	 * {@code setVarcStrValue} plus a client script — i.e. synthetic input if
+	 * fired from a panel button with no GE state to validate. Since v0.8.11
+	 * that prepare exists, but ONLY as the click-gated in-game
+	 * "RuneFlip: select …" menu option ({@link GeFieldAssistService}), where
+	 * the open editor is verified at the moment of the click. A panel-side
+	 * button cannot give that guarantee, so it stays disabled and points the
+	 * user at the in-game option instead.
 	 */
 	private JButton disabledSearchButton()
 	{
 		JButton b = smallButton("Search item");
 		b.setEnabled(false);
 		b.setToolTipText(
-			"<html>Disabled: RuneLite has no safe way to fill the in-game GE "
-				+ "search without synthetic input, which RuneFlip never does. "
-				+ "Use Copy name and type it in the official client.</html>");
+			"<html>Disabled here. With the GE search open, right-click and "
+				+ "choose “RuneFlip: select …” — it prepares the search text "
+				+ "after your explicit click and never submits anything.</html>");
 		return b;
 	}
 
