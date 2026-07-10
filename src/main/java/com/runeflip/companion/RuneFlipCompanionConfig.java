@@ -146,6 +146,42 @@ public interface RuneFlipCompanionConfig extends Config
 	}
 
 	/**
+	 * StrategyPill timeframe override (v0.8.7 design), set by clicking the
+	 * 5m/30m/2h/8h pills in the sidebar. 0 = no override (saved preferences or
+	 * the backend default apply). Display preference only: it changes which
+	 * read-only fetch the panel makes — never an action, never written to the
+	 * backend's saved preferences.
+	 */
+	@ConfigItem(
+		keyName = "strategyTimeframeMinutes",
+		name = "Strategy timeframe (pill)",
+		description = "Timeframe selected in the sidebar pills (0 = saved preferences / backend default). Display preference only.",
+		hidden = true,
+		position = 13
+	)
+	default int strategyTimeframeMinutes()
+	{
+		return 0;
+	}
+
+	/**
+	 * StrategyPill risk override (v0.8.7 design), set by clicking the
+	 * Low/Med/High pills. Empty = no override. Same display-only contract as
+	 * the timeframe override.
+	 */
+	@ConfigItem(
+		keyName = "strategyRiskLevel",
+		name = "Strategy risk (pill)",
+		description = "Risk grade selected in the sidebar pills (empty = saved preferences / backend default). Display preference only.",
+		hidden = true,
+		position = 14
+	)
+	default String strategyRiskLevel()
+	{
+		return "";
+	}
+
+	/**
 	 * Anonymous client id (v0.6.1): a stable UUID generated once per install
 	 * and sent as X-RuneFlip-Client-Id so the backend keeps this install's
 	 * data separate from other users. Isolation, not authentication — it is

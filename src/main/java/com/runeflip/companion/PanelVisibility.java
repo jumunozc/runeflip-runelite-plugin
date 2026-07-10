@@ -48,4 +48,35 @@ public final class PanelVisibility
 	{
 		return !showSelectedItem(contextual, hasSelection);
 	}
+
+	/**
+	 * StrategyPill (v0.8.7 design, state 1a): the timeframe/risk pills show only
+	 * in contextual mode with no item open — the selected-item card (1b) is
+	 * about ONE item, and legacy mode keeps its pre-design panel.
+	 */
+	public static boolean showStrategyPill(boolean contextual, boolean hasSelection)
+	{
+		return contextual && !hasSelection;
+	}
+
+	/**
+	 * SessionPanel, full KPI block (v0.8.7 design, states 1a/1c): contextual
+	 * mode with no item open. The design shows it under the Top 3 and under the
+	 * empty state alike ("Session si hay data" — the has-data gate is the
+	 * caller's, this is pure placement).
+	 */
+	public static boolean showSessionFull(boolean contextual, boolean hasSelection)
+	{
+		return contextual && !hasSelection;
+	}
+
+	/**
+	 * SessionPanel, collapsed one-liner (v0.8.7 design, state 1b): contextual
+	 * mode while an item is open — the selected-item card keeps the focus, the
+	 * session stays one glanceable row.
+	 */
+	public static boolean showSessionCompact(boolean contextual, boolean hasSelection)
+	{
+		return contextual && hasSelection;
+	}
 }

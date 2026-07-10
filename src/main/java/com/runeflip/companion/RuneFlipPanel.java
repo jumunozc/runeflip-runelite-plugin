@@ -35,22 +35,46 @@ import net.runelite.client.util.QuantityFormatter;
  */
 public class RuneFlipPanel extends PluginPanel
 {
-	private static final Color PANEL_BG = ColorScheme.DARKER_GRAY_COLOR;
-	private static final Color CARD_BG = ColorScheme.DARK_GRAY_COLOR;
+	// ── Design tokens (v0.8.7, docs/design/runelite-panel-v0.8.7.md) ────────
+	private static final Color PANEL_BG = new Color(0x15, 0x17, 0x1d);
+	private static final Color HEADER_BG = new Color(0x18, 0x1b, 0x21);
+	private static final Color CARD_BG = new Color(0x1b, 0x1e, 0x25);
+	private static final Color CARD_BORDER = new Color(0x2a, 0x2e, 0x37);
+	private static final Color CELL_BG = new Color(0x23, 0x26, 0x2e);
 	private static final Color PROFIT = new Color(0x4c, 0xba, 0x86);
 	private static final Color GOLD = new Color(0xe3, 0xb7, 0x5d);
-	private static final Color ALERT = new Color(0xe8, 0x89, 0x4a);
-	private static final Color MUTED = new Color(0x87, 0x8d, 0x9c);
+	private static final Color ALERT = new Color(0xe8, 0xa0, 0x4a);
+	private static final Color RED = new Color(0xe0, 0x67, 0x67);
+	private static final Color BLUE = new Color(0x9f, 0xb6, 0xef);
+	private static final Color TEXT = new Color(0xe7, 0xe9, 0xef);
+	private static final Color CREAM = new Color(0xf0, 0xe6, 0xd2);
+	private static final Color MUTED = new Color(0x8b, 0x91, 0xa0);
+	private static final Color FAINT = new Color(0x5c, 0x62, 0x70);
+	// Chip backgrounds: the design's 16% accent tints blended over CARD_BG.
+	private static final Color CHIP_GREEN_BG = new Color(0x23, 0x37, 0x35);
+	private static final Color CHIP_AMBER_BG = new Color(0x3c, 0x33, 0x2b);
+	private static final Color CHIP_RED_BG = new Color(0x3b, 0x2a, 0x30);
+	private static final Color CHIP_BLUE_BG = new Color(0x2e, 0x33, 0x42);
+	private static final Color CHIP_GOLD_BG = new Color(0x33, 0x30, 0x2c);
 
 	private final ItemManager itemManager;
 	private final Runnable onRefresh;
 	private final PairingActions pairingActions;
+	private final DesignActions designActions;
 
 	private final JLabel statusLabel = new JLabel("Offline");
 	private final JLabel capitalLabel = new JLabel(" ");
+	private final JPanel capitalRow;
+	/** StrategyPill (v0.8.7 design): timeframe + risk pills, contextual 1a. */
+	private final JPanel strategyPill = new JPanel();
+	/** SessionPanel (v0.8.7 design): full KPI block (1a/1c) and the collapsed
+	 *  one-liner (1b). Rebuilt from the latest {@link SessionTracker.Stats}. */
+	private final JPanel sessionPanel = new JPanel();
+	private final JPanel sessionCompactRow = new JPanel(new BorderLayout(6, 0));
+	private final JLabel sessionCompactProfit = new JLabel(" ");
 	/** Context-aware GE item card (v0.8.4) — shown only while an item is open
 	 *  in the GE Buy/Sell setup; hidden (zero space) otherwise. */
-	private final JLabel selectedHeader = new JLabel("Selected GE item");
+	private final JLabel selectedHeader = new JLabel("SELECTED GE ITEM");
 	private final JPanel selectedCard = new JPanel();
 	private final JPanel topCard = new JPanel();
 	private final JPanel listPanel = new JPanel();
@@ -77,6 +101,15 @@ public class RuneFlipPanel extends PluginPanel
 	private boolean contextualMode = false;
 	/** Whether an item is currently open in the GE Buy/Sell setup (v0.8.5). */
 	private boolean hasSelection = false;
+	/** Latest session KPIs (v0.8.7); null until the plugin pushes them. */
+	private SessionTracker.Stats sessionStats;
+	/** Portfolio coins (inventory + bank last seen) from the capital fetch;
+	 *  null when capital sync is off or nothing was observed ("si existe"). */
+	private Long portfolioCoins;
+	/** ACTIVE strategy echoed by the last overview response — drives which
+	 *  timeframe/risk pill renders highlighted. Never derived client-side. */
+	private Integer activeTimeframe;
+	private String activeRisk;
 
 	/** Rows shown in the compact completed summary; the rest is "+n more". */
 	private static final int MAX_COMPLETED_ROWS = 3;
@@ -101,9 +134,13 @@ public class RuneFlipPanel extends PluginPanel
 		"Review manually. RuneFlip never confirms trades.";
 	/** Empty Fast Flip state (v0.8.5-c): shown when the current strategy matches
 	 *  nothing and the overview has no fallback candidates either. */
-	static final String NO_MATCH_LINE = "No matches for current strategy.";
-	static final String RELAX_HINT_LINE =
-		"Try Medium risk, 30m timeframe, or lower min profit.";
+	static final String NO_MATCH_LINE = "No matches for current strategy";
+	/** Relax tips rendered as bullets in the EmptyState (v0.8.7 design). */
+	static final String[] RELAX_TIPS = {
+		"Try Medium risk",
+		"Try 30m timeframe",
+		"Lower min profit",
+	};
 	/** Banner over the fast-buy/-sell fallback rows (v0.8.5-c). */
 	static final String GENERAL_IDEAS_LABEL = "General ideas";
 	/** Offline Fast Flip state (v0.8.6): a FAILED overview fetch is not "no
@@ -115,8 +152,13 @@ public class RuneFlipPanel extends PluginPanel
 	 *  the default-strategy ideas instead of an empty box (v0.8.6). */
 	static final String DEFAULT_FALLBACK_NOTE =
 		"Saved strategy matched nothing — showing default strategy.";
+	/** SessionPanel before any completed offer this session (v0.8.7). */
+	static final String SESSION_EMPTY_LINE =
+		"No completed flips yet this session.";
 	/** Hard cap so one absurd name can never distort the narrow sidebar. */
 	private static final int MAX_NAME_CHARS = 40;
+	/** Shown in the header next to the wordmark (v0.8.7 design). */
+	static final String PLUGIN_VERSION = "0.8.8";
 
 	/**
 	 * Pairing callbacks implemented by the plugin (v0.6.3). Both are
@@ -131,15 +173,32 @@ public class RuneFlipPanel extends PluginPanel
 		void unpair(java.util.function.Consumer<String> onResult);
 	}
 
+	/**
+	 * Design-panel callbacks (v0.8.7), implemented by the plugin. All three are
+	 * user-click only and display-only: the pills change WHICH read-only fetch
+	 * the panel makes (local config + HTTP), the reset clears the local session
+	 * accounting. Nothing here can reach the game.
+	 */
+	interface DesignActions
+	{
+		void onTimeframePill(int minutes);
+
+		void onRiskPill(String riskLevel);
+
+		void onSessionReset();
+	}
+
 	public RuneFlipPanel(
 		ItemManager itemManager,
 		Runnable onRefresh,
 		PairingActions pairingActions,
+		DesignActions designActions,
 		boolean initiallyPaired)
 	{
 		this.itemManager = itemManager;
 		this.onRefresh = onRefresh;
 		this.pairingActions = pairingActions;
+		this.designActions = designActions;
 		this.pairButton = smallButton("Pair");
 		this.unpairButton = smallButton("Unpair");
 
@@ -147,12 +206,18 @@ public class RuneFlipPanel extends PluginPanel
 		setBackground(PANEL_BG);
 		setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
 
-		// ── Header: title + status + refresh ────────────────────────────────
+		// ── Header (design): RuneFlip + version left, status + refresh right ─
 		JPanel header = new JPanel(new BorderLayout());
-		header.setOpaque(false);
-		JLabel title = new JLabel("RuneFlip");
+		header.setOpaque(true);
+		header.setBackground(HEADER_BG);
+		header.setBorder(BorderFactory.createCompoundBorder(
+			BorderFactory.createMatteBorder(0, 0, 1, 0, CARD_BORDER),
+			BorderFactory.createEmptyBorder(5, 6, 5, 6)));
+		JLabel title = new JLabel(html(
+			"<span style='color:#f0e6d2'><b>Rune</b></span>"
+				+ "<span style='color:#e3b75d'><b>Flip</b></span>"
+				+ " <span style='color:#5c6270'>v" + PLUGIN_VERSION + "</span>"));
 		title.setFont(FontManager.getRunescapeBoldFont());
-		title.setForeground(GOLD);
 		header.add(title, BorderLayout.WEST);
 
 		JPanel headerRight = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
@@ -164,25 +229,36 @@ public class RuneFlipPanel extends PluginPanel
 		refresh.addActionListener(e -> onRefresh.run());
 		headerRight.add(refresh);
 		header.add(headerRight, BorderLayout.EAST);
-		header.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+		header.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
+		header.setAlignmentX(LEFT_ALIGNMENT);
 		add(header);
-		add(Box.createVerticalStrut(6));
+		add(Box.createVerticalStrut(8));
 
-		// ── Capital (read-only observation) ─────────────────────────────────
+		// ── StrategyPill (v0.8.7 design, contextual 1a) ─────────────────────
+		buildStrategyPill();
+		add(strategyPill);
+		add(Box.createVerticalStrut(8));
+		strategyPill.setVisible(false);
+
+		// ── Capital (read-only observation; legacy mode — the contextual
+		//    panel shows it as the Session "Portfolio" row instead) ──────────
 		capitalLabel.setFont(FontManager.getRunescapeSmallFont());
 		capitalLabel.setForeground(MUTED);
-		JPanel capitalRow = wrap(capitalLabel);
+		capitalRow = wrap(capitalLabel);
 		add(capitalRow);
 		add(Box.createVerticalStrut(8));
 
 		// ── Context-aware GE item (v0.8.4 — display only) ───────────────────
 		selectedHeader.setFont(FontManager.getRunescapeSmallFont());
-		selectedHeader.setForeground(GOLD);
+		selectedHeader.setForeground(MUTED);
 		add(wrap(selectedHeader));
 		add(Box.createVerticalStrut(4));
 		selectedCard.setLayout(new BoxLayout(selectedCard, BoxLayout.Y_AXIS));
 		selectedCard.setBackground(CARD_BG);
-		selectedCard.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+		// Gold-tinted border (design 1b): the selected card is the focus.
+		selectedCard.setBorder(BorderFactory.createCompoundBorder(
+			BorderFactory.createLineBorder(new Color(0x4f, 0x44, 0x2f)),
+			BorderFactory.createEmptyBorder(8, 8, 8, 8)));
 		selectedCard.setAlignmentX(LEFT_ALIGNMENT);
 		add(selectedCard);
 		add(Box.createVerticalStrut(8));
@@ -249,19 +325,57 @@ public class RuneFlipPanel extends PluginPanel
 		add(Box.createVerticalStrut(10));
 
 		// ── Fast Flip (v0.7.0 — backend-computed, display only) ────────────
+		// Section header row (v0.8.7 design): title left, ↻ Refresh link right.
 		fastFlipHeader.setFont(FontManager.getRunescapeSmallFont());
 		fastFlipHeader.setForeground(MUTED);
-		add(wrap(fastFlipHeader));
+		JPanel fastFlipHeaderRow = new JPanel(new BorderLayout(6, 0));
+		fastFlipHeaderRow.setOpaque(false);
+		fastFlipHeaderRow.add(fastFlipHeader, BorderLayout.CENTER);
+		// A JButton styled as a link — plain ActionListener, no low-level input
+		// APIs (the compliance scan forbids those even for panel-internal use).
+		JButton refreshLink = linkButton("↻ Refresh", GOLD, onRefresh);
+		fastFlipHeaderRow.add(refreshLink, BorderLayout.EAST);
+		fastFlipHeaderRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 20));
+		fastFlipHeaderRow.setAlignmentX(LEFT_ALIGNMENT);
+		add(fastFlipHeaderRow);
 		add(Box.createVerticalStrut(4));
 		fastFlipCard.setLayout(new BoxLayout(fastFlipCard, BoxLayout.Y_AXIS));
-		fastFlipCard.setBackground(CARD_BG);
-		fastFlipCard.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+		fastFlipCard.setOpaque(false);
+		fastFlipCard.setAlignmentX(LEFT_ALIGNMENT);
 		JLabel fastFlipLoading = new JLabel("Loading…");
 		fastFlipLoading.setFont(FontManager.getRunescapeSmallFont());
 		fastFlipLoading.setForeground(MUTED);
 		fastFlipCard.add(fastFlipLoading);
 		add(fastFlipCard);
 		add(Box.createVerticalStrut(10));
+
+		// ── SessionPanel (v0.8.7 design) — full KPI block + collapsed row ──
+		sessionPanel.setLayout(new BoxLayout(sessionPanel, BoxLayout.Y_AXIS));
+		sessionPanel.setBackground(CARD_BG);
+		sessionPanel.setBorder(BorderFactory.createCompoundBorder(
+			BorderFactory.createLineBorder(CARD_BORDER),
+			BorderFactory.createEmptyBorder(7, 9, 8, 9)));
+		sessionPanel.setAlignmentX(LEFT_ALIGNMENT);
+		add(sessionPanel);
+		add(Box.createVerticalStrut(8));
+		sessionPanel.setVisible(false);
+
+		sessionCompactRow.setBackground(CARD_BG);
+		sessionCompactRow.setBorder(BorderFactory.createCompoundBorder(
+			BorderFactory.createLineBorder(CARD_BORDER),
+			BorderFactory.createEmptyBorder(6, 9, 6, 9)));
+		JLabel sessionCompactTitle = new JLabel("SESSION");
+		sessionCompactTitle.setFont(FontManager.getRunescapeSmallFont());
+		sessionCompactTitle.setForeground(MUTED);
+		sessionCompactRow.add(sessionCompactTitle, BorderLayout.WEST);
+		sessionCompactProfit.setFont(FontManager.getRunescapeSmallFont());
+		sessionCompactProfit.setHorizontalAlignment(SwingConstants.RIGHT);
+		sessionCompactRow.add(sessionCompactProfit, BorderLayout.EAST);
+		sessionCompactRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+		sessionCompactRow.setAlignmentX(LEFT_ALIGNMENT);
+		add(sessionCompactRow);
+		add(Box.createVerticalStrut(8));
+		sessionCompactRow.setVisible(false);
 
 		// ── Completed offers (compact, visually secondary) ─────────────────
 		completedHeader.setFont(FontManager.getRunescapeSmallFont());
@@ -351,6 +465,10 @@ public class RuneFlipPanel extends PluginPanel
 	void updateCapital(RuneFlipData.CapitalLatestResponse response, String capitalSource)
 	{
 		RuneFlipData.Capital capital = response == null ? null : response.capital;
+		// Session "Portfolio (coins)" row (v0.8.7 design, "si existe"): the sum
+		// of the observed coin figures; null (row hidden) when nothing observed.
+		this.portfolioCoins = portfolioCoinsOf(capital);
+		rebuildSession();
 		if (capital == null)
 		{
 			capitalLabel.setText(html(
@@ -438,15 +556,243 @@ public class RuneFlipPanel extends PluginPanel
 		selectedCard.setVisible(selected);
 		fastFlipHeader.setVisible(topThree);
 		fastFlipCard.setVisible(topThree);
+		// The header row wraps the Top-3 title + refresh link.
+		java.awt.Container headerRow = fastFlipHeader.getParent();
+		if (headerRow instanceof JPanel)
+		{
+			headerRow.setVisible(topThree);
+		}
+
+		// v0.8.7 design: pills + session in contextual mode, capital line only
+		// in legacy (contextual shows it as the Session "Portfolio" row).
+		strategyPill.setVisible(
+			PanelVisibility.showStrategyPill(contextualMode, hasSelection));
+		sessionPanel.setVisible(
+			PanelVisibility.showSessionFull(contextualMode, hasSelection));
+		sessionCompactRow.setVisible(
+			PanelVisibility.showSessionCompact(contextualMode, hasSelection));
+		capitalRow.setVisible(!contextualMode);
+
+		// Footer: the design's fixed compliance line in contextual mode, the
+		// original long-form sentence in legacy.
+		disclaimer.setText(html(contextualMode
+			? safe(FAST_FLIP_FOOTER)
+			: "Informational only. RuneFlip never buys, sells or acts — "
+				+ "review every flip manually in the official client."));
 		revalidateAll();
 	}
 
+	// ── StrategyPill (v0.8.7 design) ─────────────────────────────────────────
+
+	/**
+	 * Timeframe (5m/30m/2h/8h) + risk (Low/Med/High) pills. Clicking a pill only
+	 * changes WHICH read-only fetch the panel makes (a local display preference
+	 * handed to the plugin via {@link DesignActions}); clicking the active pill
+	 * clears the override. The highlighted pill mirrors the strategy ECHO of the
+	 * last overview response — the applied strategy, never a client-side guess.
+	 */
+	private void buildStrategyPill()
+	{
+		strategyPill.removeAll();
+		strategyPill.setLayout(new BoxLayout(strategyPill, BoxLayout.Y_AXIS));
+		strategyPill.setOpaque(false);
+		strategyPill.setAlignmentX(LEFT_ALIGNMENT);
+
+		JPanel timeframes = new JPanel(new GridLayout(1, 4, 4, 0));
+		timeframes.setOpaque(false);
+		timeframes.setAlignmentX(LEFT_ALIGNMENT);
+		for (int minutes : StrategyParams.TIMEFRAME_PILLS)
+		{
+			boolean active =
+				activeTimeframe != null && activeTimeframe == minutes;
+			int value = minutes;
+			timeframes.add(pillButton(timeframeLabel(minutes), active, GOLD,
+				() -> designActions.onTimeframePill(value)));
+		}
+		timeframes.setMaximumSize(new Dimension(Integer.MAX_VALUE, 22));
+		strategyPill.add(timeframes);
+		strategyPill.add(Box.createVerticalStrut(4));
+
+		JPanel risks = new JPanel(new GridLayout(1, 4, 4, 0));
+		risks.setOpaque(false);
+		risks.setAlignmentX(LEFT_ALIGNMENT);
+		JLabel riskLabel = new JLabel("RISK");
+		riskLabel.setFont(FontManager.getRunescapeSmallFont());
+		riskLabel.setForeground(FAINT);
+		risks.add(riskLabel);
+		for (String grade : StrategyParams.RISK_PILLS)
+		{
+			boolean active = grade.equals(activeRisk);
+			risks.add(pillButton(riskPillLabel(grade), active, ALERT,
+				() -> designActions.onRiskPill(grade)));
+		}
+		risks.setMaximumSize(new Dimension(Integer.MAX_VALUE, 22));
+		strategyPill.add(risks);
+	}
+
+	/** "LOW" → "Low" etc. (pill label only; the API keeps the enum). */
+	static String riskPillLabel(String grade)
+	{
+		if (grade == null || grade.isEmpty())
+		{
+			return "?";
+		}
+		return grade.charAt(0) + grade.substring(1).toLowerCase();
+	}
+
+	// ── SessionPanel (v0.8.7 design) ─────────────────────────────────────────
+
+	/**
+	 * Pushes the latest session KPIs (computed by the plugin's SessionTracker
+	 * from passively observed offer completions) into the panel. Display only.
+	 */
+	void updateSession(SessionTracker.Stats stats)
+	{
+		this.sessionStats = stats;
+		rebuildSession();
+	}
+
+	/** Rebuilds the full Session block and the collapsed one-liner (1b). */
+	private void rebuildSession()
+	{
+		sessionPanel.removeAll();
+
+		JPanel head = new JPanel(new BorderLayout(6, 0));
+		head.setOpaque(false);
+		head.setAlignmentX(LEFT_ALIGNMENT);
+		JLabel headTitle = new JLabel("SESSION");
+		headTitle.setFont(FontManager.getRunescapeSmallFont());
+		headTitle.setForeground(MUTED);
+		head.add(headTitle, BorderLayout.WEST);
+		head.add(linkButton("Reset", MUTED,
+			() -> designActions.onSessionReset()), BorderLayout.EAST);
+		head.setMaximumSize(new Dimension(Integer.MAX_VALUE, 20));
+		sessionPanel.add(head);
+		sessionPanel.add(Box.createVerticalStrut(4));
+
+		SessionTracker.Stats stats = sessionStats;
+		long profit = stats == null ? 0 : stats.profit;
+		Color profitColor = profit < 0 ? RED : PROFIT;
+		String profitText = profitLabel(profit);
+
+		JPanel profitRow = new JPanel(new BorderLayout(6, 0));
+		profitRow.setOpaque(false);
+		profitRow.setAlignmentX(LEFT_ALIGNMENT);
+		JLabel profitKey = new JLabel("Profit");
+		profitKey.setFont(FontManager.getRunescapeSmallFont());
+		profitKey.setForeground(MUTED);
+		profitRow.add(profitKey, BorderLayout.WEST);
+		JLabel profitValue = new JLabel(profitText);
+		profitValue.setFont(FontManager.getRunescapeBoldFont());
+		profitValue.setForeground(profitColor);
+		profitValue.setHorizontalAlignment(SwingConstants.RIGHT);
+		profitRow.add(profitValue, BorderLayout.EAST);
+		profitRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 22));
+		sessionPanel.add(profitRow);
+		sessionPanel.add(Box.createVerticalStrut(3));
+
+		if (stats == null || !stats.hasActivity)
+		{
+			JLabel none = new JLabel(html(safe(SESSION_EMPTY_LINE)));
+			none.setFont(FontManager.getRunescapeSmallFont());
+			none.setForeground(FAINT);
+			none.setAlignmentX(LEFT_ALIGNMENT);
+			sessionPanel.add(none);
+		}
+		else
+		{
+			sessionPanel.add(kpiRow("Flips made",
+				String.valueOf(stats.flips), TEXT));
+			sessionPanel.add(kpiRow("ROI",
+				pctOrDash(stats.roi), stats.roi != null && stats.roi < 0
+					? RED : PROFIT));
+			sessionPanel.add(kpiRow("Session time",
+				SessionTracker.sessionTimeLabel(stats.sessionMillis), ALERT));
+			sessionPanel.add(kpiRow("Hourly profit",
+				stats.profitPerHour == null
+					? "—"
+					: profitLabel(Math.round(stats.profitPerHour)) + "/hr",
+				stats.profitPerHour != null && stats.profitPerHour < 0
+					? RED : PROFIT));
+			if (stats.openBuysCost > 0)
+			{
+				sessionPanel.add(kpiRow("Open buys",
+					gpOrDash(stats.openBuysCost), GOLD));
+			}
+		}
+		if (portfolioCoins != null)
+		{
+			sessionPanel.add(kpiRow("Portfolio (coins)",
+				gpOrDash(portfolioCoins), GOLD));
+		}
+
+		sessionCompactProfit.setText(profitText);
+		sessionCompactProfit.setForeground(profitColor);
+		sessionPanel.revalidate();
+		sessionPanel.repaint();
+		revalidate();
+		repaint();
+	}
+
+	/** One "label ....... value" KPI row (design: Session rows). */
+	private JPanel kpiRow(String key, String value, Color color)
+	{
+		JPanel row = new JPanel(new BorderLayout(6, 0));
+		row.setOpaque(false);
+		row.setAlignmentX(LEFT_ALIGNMENT);
+		JLabel k = new JLabel(key);
+		k.setFont(FontManager.getRunescapeSmallFont());
+		k.setForeground(MUTED);
+		row.add(k, BorderLayout.WEST);
+		JLabel v = new JLabel(value);
+		v.setFont(FontManager.getRunescapeSmallFont());
+		v.setForeground(color);
+		v.setHorizontalAlignment(SwingConstants.RIGHT);
+		row.add(v, BorderLayout.EAST);
+		row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 17));
+		return row;
+	}
+
+	/** Signed gp label for session figures ("+20.2K gp" / "−1,050 gp"). */
+	static String profitLabel(long gp)
+	{
+		String amount = QuantityFormatter.quantityToStackSize(Math.abs(gp)) + " gp";
+		return (gp < 0 ? "−" : "+") + amount;
+	}
+
+	/** Observed coins (inventory + bank last seen); null when neither exists. */
+	static Long portfolioCoinsOf(RuneFlipData.Capital capital)
+	{
+		if (capital == null
+			|| (capital.inventoryCoins == null && capital.bankCoinsLastSeen == null))
+		{
+			return null;
+		}
+		long total = 0;
+		if (capital.inventoryCoins != null)
+		{
+			total += capital.inventoryCoins;
+		}
+		if (capital.bankCoinsLastSeen != null)
+		{
+			total += capital.bankCoinsLastSeen;
+		}
+		return total;
+	}
+
+	/**
+	 * SelectedItemCard (v0.8.7 design, 1b): head (icon + name + risk chip +
+	 * confidence), then the WIKI Low/High cells, the TARGET Buy/Sell cells, the
+	 * EDGE VS WIKI bullets (backend messages verbatim), the PLAN grid with the
+	 * Profit highlight, the ACTION chip + reason, the Open Wiki CTA and the
+	 * opt-in ASSISTED block. Display only, ending on "Review manually."
+	 */
 	private void buildSelectedCard(
 		RuneFlipData.FastFlipItemContextResponse res,
 		boolean assistedSetup)
 	{
-		// Header: icon + sanitized name + risk + confidence (all backend data).
-		JPanel head = new JPanel(new BorderLayout(6, 0));
+		// Head: icon + name + risk chip + confidence (all backend data).
+		JPanel head = new JPanel(new BorderLayout(8, 0));
 		head.setOpaque(false);
 		head.setAlignmentX(LEFT_ALIGNMENT);
 		if (res.itemId > 0)
@@ -460,18 +806,31 @@ public class RuneFlipPanel extends PluginPanel
 			head.add(icon, BorderLayout.WEST);
 		}
 		String risk = res.riskLevel == null ? "UNKNOWN" : res.riskLevel;
-		JLabel name = new JLabel(html(
-			"<b>" + safe(sanitizeName(res.itemName)) + "</b>"
-				+ " <span style='color:" + riskColorHex(risk) + "'>· " + risk
-				+ " risk</span>"
-				+ (res.confidence != null
-					? " <span style='color:#878d9c'>· conf " + res.confidence + "</span>"
-					: "")));
-		name.setFont(FontManager.getRunescapeSmallFont());
-		name.setForeground(Color.WHITE);
-		head.add(name, BorderLayout.CENTER);
+		Color[] riskColors = riskChipColors(risk);
+		JPanel headText = new JPanel();
+		headText.setLayout(new BoxLayout(headText, BoxLayout.Y_AXIS));
+		headText.setOpaque(false);
+		JLabel name = new JLabel(sanitizeName(res.itemName));
+		name.setFont(FontManager.getRunescapeBoldFont());
+		name.setForeground(CREAM);
+		name.setAlignmentX(LEFT_ALIGNMENT);
+		headText.add(name);
+		JPanel headMeta = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
+		headMeta.setOpaque(false);
+		headMeta.setAlignmentX(LEFT_ALIGNMENT);
+		headMeta.add(chip(riskShort(risk), riskColors[0], riskColors[1]));
+		if (res.confidence != null)
+		{
+			JLabel conf = new JLabel("confidence " + res.confidence);
+			conf.setFont(FontManager.getRunescapeSmallFont());
+			conf.setForeground(FAINT);
+			headMeta.add(conf);
+		}
+		headText.add(headMeta);
+		head.add(headText, BorderLayout.CENTER);
+		head.setMaximumSize(new Dimension(Integer.MAX_VALUE, 36));
 		selectedCard.add(head);
-		selectedCard.add(Box.createVerticalStrut(6));
+		selectedCard.add(Box.createVerticalStrut(7));
 
 		// Not recommended (AVOID / not recommended / no data): say so honestly.
 		String noTarget = noRuneFlipTargetLine(res);
@@ -479,6 +838,7 @@ public class RuneFlipPanel extends PluginPanel
 		{
 			JLabel none = new JLabel(html(noTarget));
 			none.setFont(FontManager.getRunescapeSmallFont());
+			none.setAlignmentX(LEFT_ALIGNMENT);
 			selectedCard.add(none);
 			selectedCard.add(Box.createVerticalStrut(6));
 			selectedCard.add(openWikiRow(res.itemId));
@@ -487,54 +847,163 @@ public class RuneFlipPanel extends PluginPanel
 			return;
 		}
 
-		// Compact groups: Wiki legs, RuneFlip targets, safe/quick, edge messages.
 		RuneFlipData.TargetComparison tc = res.targetComparison;
-		addSelectedLine(wikiLegsLine(tc));
-		addSelectedLine(runeFlipTargetsLine(tc));
-		addSelectedLine(safeQuickLine(res.priceEdge));
-		addSelectedLine(contextComparisonBuyLine(tc));
-		addSelectedLine(contextComparisonSellLine(tc));
-		addSelectedLine(contextExtraProfitLine(tc));
 
-		// Plan grid: Qty / Cost / Profit / ROI / Time.
-		selectedCard.add(Box.createVerticalStrut(4));
-		JPanel grid = new JPanel(new GridLayout(0, 2, 6, 2));
+		// WIKI: the two raw legs as neutral cells.
+		if (tc != null && (tc.wikiLow != null || tc.wikiHigh != null))
+		{
+			selectedCard.add(sectionLabel("WIKI"));
+			selectedCard.add(Box.createVerticalStrut(3));
+			selectedCard.add(cellPair(
+				"Low", gpOrDash(tc.wikiLow), TEXT, CELL_BG,
+				"High", gpOrDash(tc.wikiHigh), TEXT, CELL_BG));
+			selectedCard.add(Box.createVerticalStrut(6));
+		}
+
+		// TARGET: the RuneFlip buy/sell targets as highlighted cells.
+		if (tc != null && (tc.targetBuy != null || tc.targetSell != null))
+		{
+			selectedCard.add(sectionLabel("TARGET"));
+			selectedCard.add(Box.createVerticalStrut(3));
+			selectedCard.add(cellPair(
+				"Buy", gpOrDash(tc.targetBuy), GOLD, CHIP_GOLD_BG,
+				"Sell", gpOrDash(tc.targetSell), PROFIT, CHIP_GREEN_BG));
+			selectedCard.add(Box.createVerticalStrut(6));
+		}
+
+		// EDGE VS WIKI: the backend's buy/sell messages, verbatim bullets.
+		String buyMessage = contextComparisonBuyLine(tc);
+		String sellMessage = contextComparisonSellLine(tc);
+		String edgeLine = contextExtraProfitLine(tc);
+		if (buyMessage != null || sellMessage != null || edgeLine != null)
+		{
+			selectedCard.add(sectionLabel("EDGE VS WIKI"));
+			selectedCard.add(Box.createVerticalStrut(3));
+			addSelectedLine(buyMessage);
+			addSelectedLine(sellMessage);
+			addSelectedLine(edgeLine);
+			selectedCard.add(Box.createVerticalStrut(6));
+		}
+
+		// PLAN: Qty / Est. time / Cost / ROI grid + the Profit highlight row.
+		selectedCard.add(sectionLabel("PLAN"));
+		selectedCard.add(Box.createVerticalStrut(3));
+		JPanel grid = new JPanel(new GridLayout(0, 2, 8, 2));
 		grid.setOpaque(false);
 		grid.setAlignmentX(LEFT_ALIGNMENT);
 		grid.add(stat("Qty", res.suggestedQuantity == null
-			? "—" : QuantityFormatter.formatNumber(res.suggestedQuantity), Color.WHITE));
+			? "—" : QuantityFormatter.formatNumber(res.suggestedQuantity), TEXT));
+		grid.add(stat("Est. time",
+			durationLabel(res.expectedDurationMinutes), ALERT));
 		grid.add(stat("Cost", gpOrDash(res.cost), GOLD));
-		grid.add(stat("Profit", profitPerItemLabel(res.expectedProfit), PROFIT));
-		grid.add(stat("ROI", pctOrDash(res.roi), Color.WHITE));
-		grid.add(stat("~Time", durationLabel(res.expectedDurationMinutes), Color.WHITE));
+		grid.add(stat("ROI", pctOrDash(res.roi), BLUE));
 		selectedCard.add(grid);
+		selectedCard.add(Box.createVerticalStrut(3));
+		JPanel profitRow = new JPanel(new BorderLayout(6, 0));
+		profitRow.setBackground(CHIP_GREEN_BG);
+		profitRow.setBorder(BorderFactory.createEmptyBorder(4, 7, 4, 7));
+		profitRow.setAlignmentX(LEFT_ALIGNMENT);
+		JLabel profitKey = new JLabel("Profit");
+		profitKey.setFont(FontManager.getRunescapeSmallFont());
+		profitKey.setForeground(MUTED);
+		profitRow.add(profitKey, BorderLayout.WEST);
+		JLabel profitValue = new JLabel(profitPerItemLabel(res.expectedProfit));
+		profitValue.setFont(FontManager.getRunescapeBoldFont());
+		profitValue.setForeground(res.expectedProfit != null
+			&& res.expectedProfit < 0 ? RED : PROFIT);
+		profitValue.setHorizontalAlignment(SwingConstants.RIGHT);
+		profitRow.add(profitValue, BorderLayout.EAST);
+		profitRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+		selectedCard.add(profitRow);
 		selectedCard.add(Box.createVerticalStrut(6));
 
-		// Recommended action (v0.8.2), verbatim + display-only.
-		String actionLine = actionLine(res.action);
-		if (actionLine != null)
+		// ACTION: chip + the backend's reason, verbatim + display-only.
+		String actionChipText = actionChipLabel(res.action);
+		if (actionChipText != null)
 		{
-			JLabel action = new JLabel(html(actionLine));
-			action.setFont(FontManager.getRunescapeSmallFont());
-			selectedCard.add(action);
+			selectedCard.add(sectionLabel("ACTION"));
+			selectedCard.add(Box.createVerticalStrut(3));
+			JPanel actionRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
+			actionRow.setOpaque(false);
+			actionRow.setAlignmentX(LEFT_ALIGNMENT);
+			Color[] actionColors = actionChipColors(res.action.actionType);
+			actionRow.add(chip(actionChipText, actionColors[0], actionColors[1]));
+			actionRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 20));
+			selectedCard.add(actionRow);
+			if (res.action.actionReason != null
+				&& !res.action.actionReason.trim().isEmpty())
+			{
+				addSelectedLine("<span style='color:#8b91a0'>"
+					+ safe(res.action.actionReason.trim()) + "</span>");
+			}
+			selectedCard.add(Box.createVerticalStrut(6));
 		}
 
-		// Assisted Offer Setup (v0.8.3, opt-in): clipboard-only Copy buttons.
+		// Open Wiki CTA + opt-in Assisted block (clipboard only, v0.8.3).
+		selectedCard.add(openWikiRow(res.itemId));
 		if (showAssistedSetup(res.action, assistedSetup))
 		{
+			selectedCard.add(Box.createVerticalStrut(4));
+			JLabel assistedTitle = new JLabel("ASSISTED · OPTIONAL");
+			assistedTitle.setFont(FontManager.getRunescapeSmallFont());
+			assistedTitle.setForeground(FAINT);
+			assistedTitle.setAlignmentX(LEFT_ALIGNMENT);
+			selectedCard.add(assistedTitle);
 			selectedCard.add(assistedSetupRow(res.action));
 			JLabel setupNote = new JLabel(html(safe(ASSISTED_SETUP_NOTE)));
 			setupNote.setFont(FontManager.getRunescapeSmallFont());
 			setupNote.setForeground(GOLD);
+			setupNote.setAlignmentX(LEFT_ALIGNMENT);
 			selectedCard.add(setupNote);
 		}
 
-		// Open Wiki + short disclaimer. The long backend copy is dropped here to
-		// keep the contextual card compact — "Review manually." says it all.
-		selectedCard.add(Box.createVerticalStrut(4));
-		selectedCard.add(openWikiRow(res.itemId));
+		// Short footer (goal 5): the compliance rule, compact.
 		selectedCard.add(Box.createVerticalStrut(4));
 		selectedCard.add(shortDisclaimerLabel());
+	}
+
+	/** Small tracking-style section label (WIKI / TARGET / PLAN / ACTION). */
+	private JLabel sectionLabel(String text)
+	{
+		JLabel label = new JLabel(text);
+		label.setFont(FontManager.getRunescapeSmallFont());
+		label.setForeground(FAINT);
+		label.setAlignmentX(LEFT_ALIGNMENT);
+		return label;
+	}
+
+	/** Two side-by-side value cells (design: WIKI Low/High, TARGET Buy/Sell). */
+	private JPanel cellPair(
+		String leftKey, String leftValue, Color leftColor, Color leftBg,
+		String rightKey, String rightValue, Color rightColor, Color rightBg)
+	{
+		JPanel pair = new JPanel(new GridLayout(1, 2, 4, 0));
+		pair.setOpaque(false);
+		pair.setAlignmentX(LEFT_ALIGNMENT);
+		pair.add(valueCell(leftKey, leftValue, leftColor, leftBg));
+		pair.add(valueCell(rightKey, rightValue, rightColor, rightBg));
+		pair.setMaximumSize(new Dimension(Integer.MAX_VALUE, 34));
+		return pair;
+	}
+
+	private JPanel valueCell(String key, String value, Color color, Color bg)
+	{
+		JPanel cell = new JPanel();
+		cell.setLayout(new BoxLayout(cell, BoxLayout.Y_AXIS));
+		cell.setBackground(bg);
+		cell.setBorder(BorderFactory.createEmptyBorder(3, 6, 3, 6));
+		JLabel k = new JLabel(key);
+		k.setFont(FontManager.getRunescapeSmallFont());
+		k.setForeground(key.equals("Buy") ? GOLD
+			: key.equals("Sell") ? PROFIT : FAINT);
+		k.setAlignmentX(LEFT_ALIGNMENT);
+		cell.add(k);
+		JLabel v = new JLabel(value);
+		v.setFont(FontManager.getRunescapeBoldFont());
+		v.setForeground(color);
+		v.setAlignmentX(LEFT_ALIGNMENT);
+		cell.add(v);
+		return cell;
 	}
 
 	/** Adds one small display-only line to the selected card when non-null. */
@@ -635,6 +1104,16 @@ public class RuneFlipPanel extends PluginPanel
 		this.assistedSetupEnabled = assistedSetup;
 		fastFlipCard.removeAll();
 
+		// StrategyPill highlight (v0.8.7): mirror the strategy the backend says
+		// it APPLIED to this response — never a client-side guess. A failed
+		// fetch keeps the previous highlight.
+		if (response != null && response.strategy != null)
+		{
+			this.activeTimeframe = response.strategy.timeframeMinutes;
+			this.activeRisk = response.strategy.riskLevel;
+			buildStrategyPill();
+		}
+
 		// Choose rows honestly (v0.8.5-c): Top ranking first, then the fast-buy/
 		// -sell candidates as "General ideas", then the informative empty state.
 		// Fixes the panel showing "Fast flip · 0" whenever a restrictive saved
@@ -642,7 +1121,7 @@ public class RuneFlipPanel extends PluginPanel
 		FastFlipSelection selection =
 			FastFlipSelection.select(response, MAX_FAST_FLIP_ROWS);
 		int shown = selection.rows.size();
-		fastFlipHeader.setText(headerTitleOf(selection.source, shown));
+		fastFlipHeader.setText(headerTitleOf(selection.source, shown).toUpperCase());
 
 		if (selection.source == FastFlipSelection.Source.NONE)
 		{
@@ -707,52 +1186,75 @@ public class RuneFlipPanel extends PluginPanel
 
 		// Assisted Offer Setup compliance note (v0.8.3): shown whenever any
 		// Copy button was rendered, so the "prepares values only" limit is
-		// always visible next to the buttons.
+		// always visible next to the buttons. The compliance footer itself is
+		// the panel-level fixed line (v0.8.7 design).
 		if (anyAssistedShown)
 		{
 			JLabel setupNote = new JLabel(html(safe(ASSISTED_SETUP_NOTE)));
 			setupNote.setFont(FontManager.getRunescapeSmallFont());
 			setupNote.setForeground(GOLD);
+			setupNote.setAlignmentX(LEFT_ALIGNMENT);
 			fastFlipCard.add(setupNote);
-			fastFlipCard.add(Box.createVerticalStrut(4));
 		}
-
-		fastFlipCard.add(fastFlipFooterLabel());
 		revalidateAll();
 	}
 
 	/**
-	 * Informative empty state for the Fast Flip card (v0.8.5-c): instead of a
-	 * bare "0", show the current strategy, an honest "no matches" line, a concrete
-	 * relax hint and a Refresh button. So a restrictive saved strategy never
+	 * EmptyState (v0.8.7 design, 1c): a centered card with the "!" badge, the
+	 * "No matches for current strategy" title, the compact strategy chip, the
+	 * relax tips and a gold Refresh button — a restrictive saved strategy never
 	 * leaves the panel blank and unexplained.
 	 */
 	private void buildFastFlipEmptyState(
 		RuneFlipData.FastFlipOverviewResponse response)
 	{
-		fastFlipCard.add(mutedLine(
-			emptyStrategyLine(response == null ? null : response.strategy)));
-		fastFlipCard.add(Box.createVerticalStrut(4));
+		JPanel card = emptyStateCard();
 
-		JLabel noMatch = new JLabel(html(safe(NO_MATCH_LINE)));
-		noMatch.setFont(FontManager.getRunescapeSmallFont());
-		noMatch.setForeground(GOLD);
-		noMatch.setAlignmentX(LEFT_ALIGNMENT);
-		fastFlipCard.add(noMatch);
+		JLabel badge = new JLabel("!");
+		badge.setFont(FontManager.getRunescapeBoldFont());
+		badge.setForeground(ALERT);
+		badge.setAlignmentX(CENTER_ALIGNMENT);
+		card.add(badge);
+		card.add(Box.createVerticalStrut(5));
 
-		fastFlipCard.add(mutedLine(RELAX_HINT_LINE));
-		fastFlipCard.add(Box.createVerticalStrut(6));
+		JLabel noMatch = new JLabel(safe(NO_MATCH_LINE));
+		noMatch.setFont(FontManager.getRunescapeBoldFont());
+		noMatch.setForeground(TEXT);
+		noMatch.setAlignmentX(CENTER_ALIGNMENT);
+		card.add(noMatch);
+		card.add(Box.createVerticalStrut(5));
+
+		// Compact strategy chip ("8h · HIGH risk"); the full description (incl.
+		// floors) follows when the backend echoed one.
+		RuneFlipData.FastFlipStrategy strategy =
+			response == null ? null : response.strategy;
+		String chipText = compactStrategyLine(strategy);
+		JLabel strategyChip = chip(
+			chipText != null ? chipText : emptyStrategyLine(null),
+			ALERT, CHIP_AMBER_BG);
+		strategyChip.setAlignmentX(CENTER_ALIGNMENT);
+		card.add(strategyChip);
+		card.add(Box.createVerticalStrut(6));
+
+		for (String tip : RELAX_TIPS)
+		{
+			JLabel line = new JLabel(html(
+				"<span style='color:#8b91a0'>· " + safe(tip) + "</span>"));
+			line.setFont(FontManager.getRunescapeSmallFont());
+			line.setAlignmentX(CENTER_ALIGNMENT);
+			card.add(line);
+		}
+		card.add(Box.createVerticalStrut(7));
 
 		// Refresh only re-fetches the read endpoints (display only) — the exact
-		// same action as the header Refresh button.
-		JPanel actions = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
-		actions.setOpaque(false);
-		actions.setAlignmentX(LEFT_ALIGNMENT);
-		actions.add(actionButton("Refresh", onRefresh));
-		fastFlipCard.add(actions);
-		fastFlipCard.add(Box.createVerticalStrut(4));
+		// same action as the header Refresh button. Gold CTA per the design.
+		JButton refresh = actionButton("↻ Refresh", onRefresh);
+		refresh.setBackground(GOLD);
+		refresh.setForeground(new Color(0x11, 0x13, 0x18));
+		refresh.setAlignmentX(CENTER_ALIGNMENT);
+		card.add(refresh);
 
-		fastFlipCard.add(fastFlipFooterLabel());
+		fastFlipCard.add(card);
 	}
 
 	/**
@@ -763,23 +1265,43 @@ public class RuneFlipPanel extends PluginPanel
 	 */
 	private void buildFastFlipOfflineState()
 	{
-		JLabel offline = new JLabel(html(safe(OFFLINE_LINE)));
-		offline.setFont(FontManager.getRunescapeSmallFont());
-		offline.setForeground(GOLD);
-		offline.setAlignmentX(LEFT_ALIGNMENT);
-		fastFlipCard.add(offline);
+		JPanel card = emptyStateCard();
 
-		fastFlipCard.add(mutedLine(OFFLINE_HINT_LINE));
-		fastFlipCard.add(Box.createVerticalStrut(6));
+		JLabel offline = new JLabel(safe(OFFLINE_LINE));
+		offline.setFont(FontManager.getRunescapeBoldFont());
+		offline.setForeground(ALERT);
+		offline.setAlignmentX(CENTER_ALIGNMENT);
+		card.add(offline);
+		card.add(Box.createVerticalStrut(5));
 
-		JPanel actions = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
-		actions.setOpaque(false);
-		actions.setAlignmentX(LEFT_ALIGNMENT);
-		actions.add(actionButton("Refresh", onRefresh));
-		fastFlipCard.add(actions);
-		fastFlipCard.add(Box.createVerticalStrut(4));
+		JLabel hint = new JLabel(html(
+			"<div style='text-align:center;color:#8b91a0'>"
+				+ safe(OFFLINE_HINT_LINE) + "</div>"));
+		hint.setFont(FontManager.getRunescapeSmallFont());
+		hint.setAlignmentX(CENTER_ALIGNMENT);
+		card.add(hint);
+		card.add(Box.createVerticalStrut(7));
 
-		fastFlipCard.add(fastFlipFooterLabel());
+		JButton refresh = actionButton("↻ Refresh", onRefresh);
+		refresh.setBackground(GOLD);
+		refresh.setForeground(new Color(0x11, 0x13, 0x18));
+		refresh.setAlignmentX(CENTER_ALIGNMENT);
+		card.add(refresh);
+
+		fastFlipCard.add(card);
+	}
+
+	/** Shared bordered, centered card container for the 1c/offline states. */
+	private JPanel emptyStateCard()
+	{
+		JPanel card = new JPanel();
+		card.setLayout(new BoxLayout(card, BoxLayout.Y_AXIS));
+		card.setBackground(CARD_BG);
+		card.setBorder(BorderFactory.createCompoundBorder(
+			BorderFactory.createLineBorder(CARD_BORDER),
+			BorderFactory.createEmptyBorder(12, 10, 12, 10)));
+		card.setAlignmentX(LEFT_ALIGNMENT);
+		return card;
 	}
 
 	/**
@@ -833,16 +1355,6 @@ public class RuneFlipPanel extends PluginPanel
 		return rest == 0 ? (minutes / 60) + "h" : (minutes / 60) + "h " + rest + "m";
 	}
 
-	/** The Fast Flip card footer (v0.8.5-c) — the compact compliance rule. */
-	private JLabel fastFlipFooterLabel()
-	{
-		JLabel label = new JLabel(html(safe(FAST_FLIP_FOOTER)));
-		label.setFont(FontManager.getRunescapeSmallFont());
-		label.setForeground(MUTED);
-		label.setAlignmentX(LEFT_ALIGNMENT);
-		return label;
-	}
-
 	/** A left-aligned muted line that wraps (html) — used for the strategy and
 	 *  relax-hint lines so long text never renders cut off in the sidebar. */
 	private JLabel mutedLine(String text)
@@ -867,10 +1379,11 @@ public class RuneFlipPanel extends PluginPanel
 	}
 
 	/**
-	 * One compact Top-3 row (v0.8.5): rank + icon + name · risk, then
-	 * Buy → Sell · expected profit · ROI, then the recommended action; plus the
-	 * opt-in clipboard-only Copy buttons when the action carries a target price.
-	 * Display only — figures come verbatim from the backend.
+	 * One TopFastFlipRow (v0.8.7 design): a bordered card — #rank chip + icon +
+	 * name + action chip, then buy → sell with the expected profit highlighted
+	 * right, then ROI + risk chip + confidence; plus the opt-in clipboard-only
+	 * Copy buttons when the action carries a target price. Display only —
+	 * figures come verbatim from the backend.
 	 */
 	private JPanel fastFlipEntry(
 		RuneFlipData.FastFlipItem flip,
@@ -879,17 +1392,19 @@ public class RuneFlipPanel extends PluginPanel
 	{
 		JPanel entry = new JPanel();
 		entry.setLayout(new BoxLayout(entry, BoxLayout.Y_AXIS));
-		entry.setOpaque(false);
+		entry.setBackground(CARD_BG);
+		entry.setBorder(BorderFactory.createCompoundBorder(
+			BorderFactory.createLineBorder(CARD_BORDER),
+			BorderFactory.createEmptyBorder(5, 7, 5, 7)));
 		entry.setAlignmentX(LEFT_ALIGNMENT);
 
-		// Row 1: #rank + icon + name · risk.
-		JPanel head = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+		// Row 1: #rank chip + icon + name (ellipsized) + action chip right.
+		JPanel head = new JPanel(new BorderLayout(5, 0));
 		head.setOpaque(false);
 		head.setAlignmentX(LEFT_ALIGNMENT);
-		JLabel rankLabel = new JLabel("#" + rank);
-		rankLabel.setFont(FontManager.getRunescapeSmallFont());
-		rankLabel.setForeground(MUTED);
-		head.add(rankLabel);
+		JPanel headLeft = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+		headLeft.setOpaque(false);
+		headLeft.add(chip("#" + rank, GOLD, CHIP_GOLD_BG));
 		if (flip.itemId > 0)
 		{
 			JLabel icon = new JLabel();
@@ -898,32 +1413,66 @@ public class RuneFlipPanel extends PluginPanel
 			{
 				img.addTo(icon);
 			}
-			head.add(icon);
+			headLeft.add(icon);
 		}
-		String risk = flip.riskLevel == null ? "UNKNOWN" : flip.riskLevel;
-		JLabel name = new JLabel(html(
-			"<b>" + safe(sanitizeName(flip.itemName)) + "</b>"
-				+ " <span style='color:" + riskColorHex(risk) + "'>· " + risk
-				+ "</span>"));
+		head.add(headLeft, BorderLayout.WEST);
+		JLabel name = new JLabel(sanitizeName(flip.itemName));
 		name.setFont(FontManager.getRunescapeSmallFont());
-		name.setForeground(Color.WHITE);
-		head.add(name);
-		entry.add(head);
-
-		// Row 2: Buy → Sell · expected profit · ROI (all backend figures).
-		JLabel stats = new JLabel(html(topFlipStatsLine(flip)));
-		stats.setFont(FontManager.getRunescapeSmallFont());
-		stats.setForeground(Color.WHITE);
-		entry.add(stats);
-
-		// Row 3: recommended action (v0.8.2), verbatim + display-only.
-		String actionLine = actionLine(flip.action);
-		if (actionLine != null)
+		name.setForeground(TEXT);
+		head.add(name, BorderLayout.CENTER);
+		String actionChipText = actionChipLabel(flip.action);
+		if (actionChipText != null)
 		{
-			JLabel action = new JLabel(html(actionLine));
-			action.setFont(FontManager.getRunescapeSmallFont());
-			entry.add(action);
+			Color[] actionColors = actionChipColors(flip.action.actionType);
+			head.add(chip(actionChipText, actionColors[0], actionColors[1]),
+				BorderLayout.EAST);
 		}
+		head.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+		entry.add(head);
+		entry.add(Box.createVerticalStrut(3));
+
+		// Row 2: buy → sell left, expected whole-flip profit highlighted right.
+		JPanel legs = new JPanel(new BorderLayout(6, 0));
+		legs.setOpaque(false);
+		legs.setAlignmentX(LEFT_ALIGNMENT);
+		JLabel prices = new JLabel(html(
+			"<span style='color:#8b91a0'>" + gpOrDash(flip.suggestedBuyPrice)
+				+ " → " + gpOrDash(flip.suggestedSellPrice) + "</span>"));
+		prices.setFont(FontManager.getRunescapeSmallFont());
+		legs.add(prices, BorderLayout.WEST);
+		JLabel profit = new JLabel(profitPerItemLabel(flip.estimatedProfit));
+		profit.setFont(FontManager.getRunescapeBoldFont());
+		profit.setForeground(flip.estimatedProfit != null
+			&& flip.estimatedProfit < 0 ? RED : PROFIT);
+		profit.setHorizontalAlignment(SwingConstants.RIGHT);
+		legs.add(profit, BorderLayout.EAST);
+		legs.setMaximumSize(new Dimension(Integer.MAX_VALUE, 18));
+		entry.add(legs);
+		entry.add(Box.createVerticalStrut(3));
+
+		// Row 3: ROI + risk chip left, confidence right.
+		JPanel meta = new JPanel(new BorderLayout(6, 0));
+		meta.setOpaque(false);
+		meta.setAlignmentX(LEFT_ALIGNMENT);
+		JPanel metaLeft = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
+		metaLeft.setOpaque(false);
+		JLabel roi = new JLabel("ROI " + pctOrDash(flip.roi));
+		roi.setFont(FontManager.getRunescapeSmallFont());
+		roi.setForeground(BLUE);
+		metaLeft.add(roi);
+		String risk = flip.riskLevel == null ? "UNKNOWN" : flip.riskLevel;
+		Color[] riskColors = riskChipColors(risk);
+		metaLeft.add(chip(riskShort(risk), riskColors[0], riskColors[1]));
+		meta.add(metaLeft, BorderLayout.WEST);
+		if (flip.confidence != null)
+		{
+			JLabel conf = new JLabel("conf " + flip.confidence);
+			conf.setFont(FontManager.getRunescapeSmallFont());
+			conf.setForeground(FAINT);
+			meta.add(conf, BorderLayout.EAST);
+		}
+		meta.setMaximumSize(new Dimension(Integer.MAX_VALUE, 20));
+		entry.add(meta);
 
 		// Assisted Offer Setup (v0.8.3, opt-in): clipboard-only Copy buttons.
 		if (showAssistedSetup(flip.action, assistedSetup))
@@ -932,6 +1481,28 @@ public class RuneFlipPanel extends PluginPanel
 		}
 
 		return entry;
+	}
+
+	/** Action chip text (design): the backend's label, uppercased; null when
+	 *  the backend sent no action (pre-0.8.2) — no chip is invented. */
+	static String actionChipLabel(RuneFlipData.RecommendedAction action)
+	{
+		if (action == null || action.actionLabel == null
+			|| action.actionLabel.trim().isEmpty())
+		{
+			return null;
+		}
+		return action.actionLabel.trim().toUpperCase();
+	}
+
+	/** "MEDIUM" → "MED" etc. — the design's compact chip text. */
+	static String riskShort(String riskLevel)
+	{
+		if (riskLevel == null)
+		{
+			return "?";
+		}
+		return "MEDIUM".equals(riskLevel) ? "MED" : riskLevel;
 	}
 
 	/**
@@ -1483,6 +2054,99 @@ public class RuneFlipPanel extends PluginPanel
 		JButton b = smallButton(text);
 		b.addActionListener(e -> action.run());
 		return b;
+	}
+
+	/** Borderless link-style button (design: "↻ Refresh", "Reset"). Plain
+	 *  ActionListener — never a low-level input API. */
+	private JButton linkButton(String text, Color color, Runnable action)
+	{
+		JButton b = new JButton(text);
+		b.setFont(FontManager.getRunescapeSmallFont());
+		b.setForeground(color);
+		b.setFocusPainted(false);
+		b.setContentAreaFilled(false);
+		b.setBorder(BorderFactory.createEmptyBorder(0, 4, 0, 4));
+		b.addActionListener(e -> action.run());
+		return b;
+	}
+
+	/** One StrategyPill segment: active = accent bg + dark text (design). */
+	private JButton pillButton(
+		String text, boolean active, Color accent, Runnable action)
+	{
+		JButton b = new JButton(text);
+		b.setFont(FontManager.getRunescapeSmallFont());
+		b.setFocusPainted(false);
+		b.setMargin(new java.awt.Insets(1, 2, 1, 2));
+		if (active)
+		{
+			b.setBackground(accent);
+			b.setForeground(new Color(0x11, 0x13, 0x18));
+		}
+		else
+		{
+			b.setBackground(CELL_BG);
+			b.setForeground(MUTED);
+		}
+		b.addActionListener(e -> action.run());
+		return b;
+	}
+
+	/** Small colored chip (design: risk / action chips). */
+	private JLabel chip(String text, Color fg, Color bg)
+	{
+		JLabel label = new JLabel(text);
+		label.setFont(FontManager.getRunescapeSmallFont());
+		label.setForeground(fg);
+		label.setBackground(bg);
+		label.setOpaque(true);
+		label.setBorder(BorderFactory.createEmptyBorder(1, 5, 1, 5));
+		return label;
+	}
+
+	/** Risk grade → chip colors (design: LOW green / MED amber / HIGH red). */
+	private Color[] riskChipColors(String riskLevel)
+	{
+		if ("LOW".equals(riskLevel))
+		{
+			return new Color[] {PROFIT, CHIP_GREEN_BG};
+		}
+		if ("MEDIUM".equals(riskLevel))
+		{
+			return new Color[] {ALERT, CHIP_AMBER_BG};
+		}
+		if ("HIGH".equals(riskLevel) || "AVOID".equals(riskLevel))
+		{
+			return new Color[] {RED, CHIP_RED_BG};
+		}
+		return new Color[] {MUTED, CELL_BG};
+	}
+
+	/** Action type → chip colors (design: buy green / sell blue / hold amber). */
+	private Color[] actionChipColors(String actionType)
+	{
+		if ("BUY_NEW".equals(actionType))
+		{
+			return new Color[] {PROFIT, CHIP_GREEN_BG};
+		}
+		if ("SELL_EXISTING".equals(actionType))
+		{
+			return new Color[] {BLUE, CHIP_BLUE_BG};
+		}
+		if ("HOLD".equals(actionType))
+		{
+			return new Color[] {ALERT, CHIP_AMBER_BG};
+		}
+		if ("MODIFY_BUY".equals(actionType) || "MODIFY_SELL".equals(actionType))
+		{
+			return new Color[] {GOLD, CHIP_GOLD_BG};
+		}
+		if ("ABORT_BUY".equals(actionType) || "ABORT_SELL".equals(actionType)
+			|| "AVOID".equals(actionType))
+		{
+			return new Color[] {RED, CHIP_RED_BG};
+		}
+		return new Color[] {MUTED, CELL_BG};
 	}
 
 	/** Clipboard only — a safe, user-initiated convenience. */

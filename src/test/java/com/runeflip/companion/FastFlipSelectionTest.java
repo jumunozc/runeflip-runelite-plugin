@@ -160,11 +160,13 @@ public class FastFlipSelectionTest
 		assertEquals("Strategy: default (risk up to HIGH)",
 			RuneFlipPanel.emptyStrategyLine(null));
 
-		// The concrete relax hint names the levers a user can loosen.
+		// The concrete relax tips (v0.8.7 design bullets) name the levers a
+		// user can loosen.
 		assertTrue(RuneFlipPanel.NO_MATCH_LINE.contains("No matches"));
-		assertTrue(RuneFlipPanel.RELAX_HINT_LINE.contains("Medium risk"));
-		assertTrue(RuneFlipPanel.RELAX_HINT_LINE.contains("30m"));
-		assertTrue(RuneFlipPanel.RELAX_HINT_LINE.contains("min profit"));
+		String tips = String.join(" · ", RuneFlipPanel.RELAX_TIPS);
+		assertTrue(tips.contains("Medium risk"));
+		assertTrue(tips.contains("30m"));
+		assertTrue(tips.contains("min profit"));
 	}
 
 	@Test

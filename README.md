@@ -150,7 +150,7 @@ yourself**:
 
 1. Build the jar (see **Build** above): `./gradlew clean test build` produces
    `build/libs/runeflip-companion-<version>.jar` (currently
-   `runeflip-companion-0.8.7.jar`).
+   `runeflip-companion-0.8.8.jar`).
 2. Copy that jar into RuneLite's sideloaded-plugins folder:
    - Windows: `%USERPROFILE%\.runelite\sideloaded-plugins\`
    - macOS / Linux: `~/.runelite/sideloaded-plugins/`
@@ -162,6 +162,19 @@ install only a jar you built (or trust). The default **Backend URL**
 (`https://runeflip-api.onrender.com/api`) points at the public RuneFlip
 service; point it at your own backend if you self-host.
 
+> **v0.8.8** (2026-07): the contextual panel now implements RuneFlip's official
+> panel design. New **strategy pills** (5m/30m/2h/8h · Low/Med/High) tune the
+> read-only fetch locally (never written to the backend); Top-3 rows become
+> compact cards with rank/action/risk chips and highlighted profit; the
+> selected-item card gains WIKI / TARGET / EDGE VS WIKI / PLAN / ACTION
+> sections; and a new **Session panel** answers "how did this session go?"
+> (profit, flips, ROI, session time, hourly rate — computed only from offers
+> you completed yourself; login replay never counts). Empty state redesigned
+> with a strategy chip + relax tips. Compliance unchanged: display-only,
+> clipboard-only opt-in copy buttons, *"Review manually. RuneFlip never
+> confirms trades."* `gradlew clean test build` green (116 tests, incl.
+> `ComplianceScanTest`), jar emitted.
+>
 > **v0.8.7** (2026-07): hotfix — fixes the REAL cause of "Fast flip · 0": the
 > backend sends `dumpRisk`/`competitionRisk` as grade strings (`"LOW"`…), but
 > the plugin DTO typed them as numbers, so parsing **every** real overview

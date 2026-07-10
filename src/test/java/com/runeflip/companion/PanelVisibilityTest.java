@@ -65,4 +65,53 @@ public class PanelVisibilityTest
 			}
 		}
 	}
+
+	// ── v0.8.7 design states ─────────────────────────────────────────────────
+
+	@Test
+	public void stateA_noItemShowsPillsTopThreeAndFullSession()
+	{
+		// Design 1a: no GE item → StrategyPill + Top 3 + full SessionPanel.
+		assertTrue(PanelVisibility.showStrategyPill(true, false));
+		assertTrue(PanelVisibility.showTopThree(true, false));
+		assertTrue(PanelVisibility.showSessionFull(true, false));
+		assertFalse(PanelVisibility.showSessionCompact(true, false));
+	}
+
+	@Test
+	public void stateB_selectedItemShowsTheCardAndTheCompactSession()
+	{
+		// Design 1b: item open → SelectedItemCard + collapsed session only.
+		assertTrue(PanelVisibility.showSelectedItem(true, true));
+		assertTrue(PanelVisibility.showSessionCompact(true, true));
+		assertFalse(PanelVisibility.showSessionFull(true, true));
+		assertFalse(PanelVisibility.showStrategyPill(true, true));
+		assertFalse(PanelVisibility.showTopThree(true, true));
+	}
+
+	@Test
+	public void legacyModeNeverShowsTheDesignComponents()
+	{
+		for (boolean sel : new boolean[] {true, false})
+		{
+			assertFalse(PanelVisibility.showStrategyPill(false, sel));
+			assertFalse(PanelVisibility.showSessionFull(false, sel));
+			assertFalse(PanelVisibility.showSessionCompact(false, sel));
+		}
+	}
+
+	@Test
+	public void fullAndCompactSessionAreMutuallyExclusive()
+	{
+		for (boolean ctx : new boolean[] {true, false})
+		{
+			for (boolean sel : new boolean[] {true, false})
+			{
+				assertFalse(
+					"full and compact session must never both show",
+					PanelVisibility.showSessionFull(ctx, sel)
+						&& PanelVisibility.showSessionCompact(ctx, sel));
+			}
+		}
+	}
 }

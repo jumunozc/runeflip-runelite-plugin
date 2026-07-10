@@ -111,6 +111,9 @@ public class RuneFlipCompanionPlugin extends Plugin
 	private RuneFlipPanel panel;
 	private NavigationButton navButton;
 	private RuneFlipApiClient apiClient;
+	/** SessionPanel accounting (v0.8.7): pure sums over passively observed
+	 *  offer completions — display only, never an action. */
+	private SessionTracker sessionTracker;
 	private volatile long lastPanelRefreshMs;
 	private volatile long lastPanelOkMs;
 	/** Item currently open in the GE Buy/Sell setup (v0.8.4), -1 when none.
@@ -162,10 +165,12 @@ public class RuneFlipCompanionPlugin extends Plugin
 	{
 		ensureClientId();
 		apiClient = new RuneFlipApiClient(okHttpClient, gson);
+		sessionTracker = new SessionTracker(System.currentTimeMillis());
 		if (config.panelEnabled())
 		{
 			panel = new RuneFlipPanel(
-				itemManager, this::refreshPanel, pairingActions(), isPaired());
+				itemManager, this::refreshPanel, pairingActions(),
+				designActions(), isPaired());
 			navButton = NavigationButton.builder()
 				.tooltip("RuneFlip")
 				.icon(buildNavIcon())
@@ -191,11 +196,72 @@ public class RuneFlipCompanionPlugin extends Plugin
 		log.info("RuneFlip Companion stopped (last sync: {} at {})", lastSyncStatus, lastSyncAt);
 	}
 
-	/** Passive observation only — marks the state dirty, nothing else. */
+	/**
+	 * Passive observation only — marks the state dirty and feeds the session
+	 * accounting (v0.8.7). The tracker only records ACTIVE→DONE transitions it
+	 * saw itself, so the login replay never counts as session activity. Reading
+	 * event fields is the only game touch-point; nothing is ever acted on.
+	 */
 	@Subscribe
 	public void onGrandExchangeOfferChanged(GrandExchangeOfferChanged event)
 	{
 		dirtyAtMs = System.currentTimeMillis();
+		SessionTracker tracker = sessionTracker;
+		GrandExchangeOffer offer = event.getOffer();
+		if (tracker == null || offer == null)
+		{
+			return;
+		}
+		tracker.observe(
+			event.getSlot(),
+			sessionPhaseOf(offer.getState()),
+			offer.getItemId(),
+			offer.getQuantitySold(),
+			offer.getSpent());
+		pushSessionStats();
+	}
+
+	/**
+	 * RuneLite offer state → session phase. Cancelled offers with partial fills
+	 * count as done for the filled part (the coins really moved); unknown
+	 * states map to EMPTY so nothing is ever guessed.
+	 */
+	static SessionTracker.SlotPhase sessionPhaseOf(
+		net.runelite.api.GrandExchangeOfferState state)
+	{
+		if (state == null)
+		{
+			return SessionTracker.SlotPhase.EMPTY;
+		}
+		switch (state)
+		{
+			case BUYING:
+				return SessionTracker.SlotPhase.ACTIVE_BUY;
+			case SELLING:
+				return SessionTracker.SlotPhase.ACTIVE_SELL;
+			case BOUGHT:
+			case CANCELLED_BUY:
+				return SessionTracker.SlotPhase.DONE_BUY;
+			case SOLD:
+			case CANCELLED_SELL:
+				return SessionTracker.SlotPhase.DONE_SELL;
+			default:
+				return SessionTracker.SlotPhase.EMPTY;
+		}
+	}
+
+	/** Pushes the latest session KPIs to the panel (EDT). Display only. */
+	private void pushSessionStats()
+	{
+		RuneFlipPanel target = panel;
+		SessionTracker tracker = sessionTracker;
+		if (target == null || tracker == null)
+		{
+			return;
+		}
+		SessionTracker.Stats stats =
+			tracker.stats(System.currentTimeMillis());
+		SwingUtilities.invokeLater(() -> target.updateSession(stats));
 	}
 
 	/**
@@ -277,11 +343,11 @@ public class RuneFlipCompanionPlugin extends Plugin
 		boolean assistedSetup = config.enableAssistedOfferSetup();
 		apiClient.fetchStrategyPreferences(url, clientId,
 			prefs -> apiClient.fetchFastFlipItem(url, itemId,
-				RuneFlipApiClient.strategyQueryOf(prefs), clientId,
+				overriddenQuery(RuneFlipApiClient.strategyQueryOf(prefs)), clientId,
 				res -> SwingUtilities.invokeLater(
 					() -> respectSelection(itemId, target, res, assistedSetup)),
 				() -> SwingUtilities.invokeLater(target::clearSelectedItem)),
-			() -> apiClient.fetchFastFlipItem(url, itemId, "", clientId,
+			() -> apiClient.fetchFastFlipItem(url, itemId, overriddenQuery(""), clientId,
 				res -> SwingUtilities.invokeLater(
 					() -> respectSelection(itemId, target, res, assistedSetup)),
 				() -> SwingUtilities.invokeLater(target::clearSelectedItem)));
@@ -372,6 +438,50 @@ public class RuneFlipCompanionPlugin extends Plugin
 	{
 		return !config.pairedAt().trim().isEmpty()
 			&& !config.ingestToken().trim().isEmpty();
+	}
+
+	/**
+	 * StrategyPill + Session callbacks (v0.8.7 design). All display-only:
+	 * pills store a LOCAL fetch preference (clicking the active pill clears
+	 * it) and re-fetch; reset clears the local session accounting. Nothing
+	 * here writes to the backend's saved preferences or touches the game.
+	 */
+	private RuneFlipPanel.DesignActions designActions()
+	{
+		return new RuneFlipPanel.DesignActions()
+		{
+			@Override
+			public void onTimeframePill(int minutes)
+			{
+				int next = config.strategyTimeframeMinutes() == minutes
+					? 0 : minutes;
+				configManager.setConfiguration(
+					RuneFlipCompanionConfig.GROUP,
+					"strategyTimeframeMinutes", next);
+				refreshPanel();
+			}
+
+			@Override
+			public void onRiskPill(String riskLevel)
+			{
+				String next = riskLevel.equals(config.strategyRiskLevel())
+					? "" : riskLevel;
+				configManager.setConfiguration(
+					RuneFlipCompanionConfig.GROUP, "strategyRiskLevel", next);
+				refreshPanel();
+			}
+
+			@Override
+			public void onSessionReset()
+			{
+				SessionTracker tracker = sessionTracker;
+				if (tracker != null)
+				{
+					tracker.reset(System.currentTimeMillis());
+				}
+				pushSessionStats();
+			}
+		};
 	}
 
 	private RuneFlipPanel.PairingActions pairingActions()
@@ -537,15 +647,32 @@ public class RuneFlipCompanionPlugin extends Plugin
 		// Assisted Offer Setup opt-in (v0.8.3): read once per refresh and
 		// passed to the panel so its clipboard-only Copy buttons reflect the
 		// current config. OFF by default — display-only otherwise.
+		// SessionPanel KPIs (v0.8.7): refresh alongside the reads so the
+		// session time stays current even without new offer events.
+		pushSessionStats();
+
+		// The StrategyPill's local override (v0.8.7) is applied on top of the
+		// saved preferences — and still applies when the prefs fetch fails.
 		boolean assistedSetup = config.enableAssistedOfferSetup();
 		apiClient.fetchStrategyPreferences(url, clientId,
-			prefs -> loadFastFlip(url, RuneFlipApiClient.strategyQueryOf(prefs),
+			prefs -> loadFastFlip(url,
+				overriddenQuery(RuneFlipApiClient.strategyQueryOf(prefs)),
 				clientId, assistedSetup, target),
-			() -> loadFastFlip(url, "", clientId, assistedSetup, target));
+			() -> loadFastFlip(url, overriddenQuery(""),
+				clientId, assistedSetup, target));
 
 		apiClient.fetchCompletedAlerts(url, clientId,
 			response -> SwingUtilities.invokeLater(() -> target.updateCompleted(response)),
 			() -> SwingUtilities.invokeLater(() -> target.updateCompleted(null)));
+	}
+
+	/** Saved-preferences query + the StrategyPill's local override (v0.8.7). */
+	private String overriddenQuery(String baseQuery)
+	{
+		return StrategyParams.override(
+			baseQuery,
+			config.strategyTimeframeMinutes(),
+			config.strategyRiskLevel());
 	}
 
 	/**
