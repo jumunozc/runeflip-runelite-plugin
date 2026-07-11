@@ -45,6 +45,16 @@ or session data; never receives commands from the backend.
   selection is kept and the card says *"Open GE search to use this item."*
   Without a click the default is the first row of the current page. Paging
   and selecting never set price/quantity and never confirm anything.
+- **SELL-slot hover PROFIT line (v0.8.19, display-only).** Hovering an
+  **active SELL slot** on the GE main screen adds one short tooltip line
+  next to the native one: `PROFIT: +50K gp` (green), `PROFIT: -2K gp`
+  (red) or `PROFIT: unknown`. **SELL slot hover shows PROFIT only when
+  RuneFlip has tracked cost basis** — the weighted average of the buys it
+  passively observed this session; a buy price is never invented. The tax
+  mirrors RuneFlip's backend rule (2% floored per item, 5M cap). BUY
+  slots, empty slots and completed offers get no line. Detection is a
+  read-only widget-bounds check (no OCR, no pixel access) and a tooltip
+  performs no action.
 - **Explicit GE Field Assist (v0.8.11, click-gated; visible since
   v0.8.13; functional search row since v0.8.17).** Official rule:
   **RuneFlip can prepare GE fields after explicit user action, but must
@@ -227,7 +237,7 @@ yourself**:
 
 1. Build the jar (see **Build** above): `./gradlew clean test build` produces
    `build/libs/runeflip-companion-<version>.jar` (currently
-   `runeflip-companion-0.8.18.jar`).
+   `runeflip-companion-0.8.19.jar`).
 2. Copy that jar into RuneLite's sideloaded-plugins folder:
    - Windows: `%USERPROFILE%\.runelite\sideloaded-plugins\`
    - macOS / Linux: `~/.runelite/sideloaded-plugins/`
@@ -239,6 +249,15 @@ install only a jar you built (or trust). The default **Backend URL**
 (`https://runeflip-api.onrender.com/api`) points at the public RuneFlip
 service; point it at your own backend if you self-host.
 
+> **v0.8.19** (2026-07): SELL-slot hover PROFIT line. Hovering an active
+> SELL slot shows `PROFIT: +50K gp` / `PROFIT: -2K gp` / `PROFIT:
+> unknown` as one display-only tooltip line (RuneLite TooltipManager).
+> Cost basis = session-tracked buys only (`SessionTracker.avgBuyPriceOf`,
+> weighted average, consumed as sells complete) — never invented; tax =
+> backend rule (2% floored/item, 5M cap). BUY/empty/completed slots get
+> no line. New `SellSlotProfit` + `GeSlotHover` + `SellSlotProfitTest`;
+> ComplianceScanTest green. `gradlew clean test build` green.
+>
 > **v0.8.18** (2026-07): selectable Top suggestions + paginated GE assist.
 > The Fast Flip card now pages the extended suggestion list in threes
 > ("Suggestions 1–3 / 4–6 / …", ◀ ▶ controls, up to 12 items — Top ranking

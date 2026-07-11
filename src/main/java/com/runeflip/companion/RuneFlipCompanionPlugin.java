@@ -18,6 +18,7 @@ import net.runelite.api.InventoryID;
 import net.runelite.api.ItemContainer;
 import net.runelite.api.ItemID;
 import net.runelite.api.MenuAction;
+import net.runelite.api.events.ClientTick;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.GrandExchangeOfferChanged;
 import net.runelite.api.events.ItemContainerChanged;
@@ -35,6 +36,8 @@ import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.task.Schedule;
 import net.runelite.client.ui.ClientToolbar;
 import net.runelite.client.ui.NavigationButton;
+import net.runelite.client.ui.overlay.tooltip.Tooltip;
+import net.runelite.client.ui.overlay.tooltip.TooltipManager;
 import okhttp3.Call;
 import okhttp3.Callback;
 import okhttp3.MediaType;
@@ -115,6 +118,11 @@ public class RuneFlipCompanionPlugin extends Plugin
 	@Inject
 	private KeyManager keyManager;
 
+	/** RuneLite's shared tooltip renderer (v0.8.19) — display only; adding
+	 *  a tooltip line is information, never an action. */
+	@Inject
+	private TooltipManager tooltipManager;
+
 	private RuneFlipPanel panel;
 	private NavigationButton navButton;
 	private RuneFlipApiClient apiClient;
@@ -178,6 +186,9 @@ public class RuneFlipCompanionPlugin extends Plugin
 	/** The user's assist hotkey, listened via RuneLite's KeyManager (the
 	 *  user's OWN key press — never synthesized). */
 	private GeFieldAssistHotkey assistHotkey;
+	/** Read-only hover detection over the GE slot widgets (v0.8.19) — feeds
+	 *  the display-only SELL-slot PROFIT tooltip line. */
+	private GeSlotHover slotHover;
 	/** Last hint-state DEBUG snapshot logged (editor, hint, render result,
 	 *  widget states) — dedupes the per-tick diagnostic; null = none. */
 	private String lastHintText;
@@ -231,6 +242,7 @@ public class RuneFlipCompanionPlugin extends Plugin
 		fieldAssist = new GeFieldAssistService(client);
 		searchAssist = new GeSearchAssistService(client, fieldAssist);
 		chatboxHint = new GeChatboxHint(client);
+		slotHover = new GeSlotHover(client);
 		assistHotkey = new GeFieldAssistHotkey(
 			keyManager, () -> config.geFieldAssistHotkey(), this::onAssistHotkey);
 		assistHotkey.register();
@@ -323,6 +335,51 @@ public class RuneFlipCompanionPlugin extends Plugin
 			default:
 				return SessionTracker.SlotPhase.EMPTY;
 		}
+	}
+
+	/**
+	 * SELL-slot hover PROFIT line (v0.8.19) — display only. While the mouse
+	 * rests on an ACTIVE sell slot with a real item, ONE color-tagged
+	 * tooltip line renders next to the native slot tooltip:
+	 * "PROFIT: +50K gp" (green) / "PROFIT: -2K gp" (red), or
+	 * "PROFIT: unknown" when RuneFlip never observed this session's buy of
+	 * the item — a cost basis is never invented. BUY slots, empty slots and
+	 * completed offers get no line. Everything read here (hovered widget
+	 * bounds, official offer fields, session accounting) is passive
+	 * observation, and a tooltip performs no action — nothing can touch an
+	 * offer.
+	 */
+	@Subscribe
+	public void onClientTick(ClientTick event)
+	{
+		GeSlotHover hover = slotHover;
+		TooltipManager tooltips = tooltipManager;
+		if (hover == null || tooltips == null)
+		{
+			return;
+		}
+		int slot = hover.hoveredSlot();
+		if (slot < 0)
+		{
+			return;
+		}
+		GrandExchangeOffer[] offers = client.getGrandExchangeOffers();
+		if (offers == null || slot >= offers.length)
+		{
+			return;
+		}
+		GrandExchangeOffer offer = offers[slot];
+		if (offer == null
+			|| !SellSlotProfit.appliesTo(offer.getState(), offer.getItemId()))
+		{
+			return;
+		}
+		SessionTracker tracker = sessionTracker;
+		Long avgBuy = tracker == null
+			? null : tracker.avgBuyPriceOf(offer.getItemId());
+		Long profit = SellSlotProfit.profitOf(
+			offer.getPrice(), offer.getTotalQuantity(), avgBuy);
+		tooltips.add(new Tooltip(SellSlotProfit.tooltipLine(profit)));
 	}
 
 	/** Pushes the latest session KPIs to the panel (EDT). Display only. */

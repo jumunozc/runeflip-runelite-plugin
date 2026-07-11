@@ -155,6 +155,23 @@ public class SessionTracker
 		}
 	}
 
+	/**
+	 * Weighted-average session buy cost per unit for the item (v0.8.19,
+	 * feeds the SELL-slot hover PROFIT line), or null when no session-
+	 * tracked buys of the item remain — the caller must then say "unknown"
+	 * rather than invent a buy price. Positions are consumed as sells
+	 * complete, so this always reflects the still-open cost basis.
+	 */
+	public synchronized Long avgBuyPriceOf(int itemId)
+	{
+		Position position = positions.get(itemId);
+		if (position == null || position.quantity <= 0 || position.cost <= 0)
+		{
+			return null;
+		}
+		return Math.round((double) position.cost / position.quantity);
+	}
+
 	/** Clears all session state and restarts the clock. */
 	public synchronized void reset(long nowMs)
 	{

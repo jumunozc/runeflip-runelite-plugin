@@ -177,4 +177,46 @@ public class SessionTrackerTest
 		assertEquals(Long.valueOf(7_250_000L),
 			RuneFlipPanel.portfolioCoinsOf(capital));
 	}
+
+	// ── avgBuyPriceOf (v0.8.19) — the SELL-hover cost basis ─────────────────
+
+	@Test
+	public void avgBuyPriceReflectsSessionBuysOnly()
+	{
+		SessionTracker tracker = new SessionTracker(0);
+		// Nothing tracked yet → no cost basis, never invented.
+		assertNull(tracker.avgBuyPriceOf(ITEM));
+
+		// Buy 100 @ 1,000 gp each (100,000 total), observed active → done.
+		tracker.observe(SLOT, SessionTracker.SlotPhase.ACTIVE_BUY, ITEM, 0, 0);
+		tracker.observe(SLOT, SessionTracker.SlotPhase.DONE_BUY, ITEM, 100, 100_000);
+		assertEquals(Long.valueOf(1_000), tracker.avgBuyPriceOf(ITEM));
+
+		// A second buy at a higher price moves the weighted average.
+		tracker.observe(SLOT, SessionTracker.SlotPhase.ACTIVE_BUY, ITEM, 0, 0);
+		tracker.observe(SLOT, SessionTracker.SlotPhase.DONE_BUY, ITEM, 100, 140_000);
+		assertEquals(Long.valueOf(1_200), tracker.avgBuyPriceOf(ITEM));
+
+		// Other items stay unknown.
+		assertNull(tracker.avgBuyPriceOf(ITEM + 1));
+	}
+
+	@Test
+	public void avgBuyPriceIsConsumedByCompletedSellsAndClearedByReset()
+	{
+		SessionTracker tracker = new SessionTracker(0);
+		tracker.observe(SLOT, SessionTracker.SlotPhase.ACTIVE_BUY, ITEM, 0, 0);
+		tracker.observe(SLOT, SessionTracker.SlotPhase.DONE_BUY, ITEM, 100, 100_000);
+
+		// Selling the whole position consumes the basis → unknown again.
+		tracker.observe(SLOT, SessionTracker.SlotPhase.ACTIVE_SELL, ITEM, 0, 0);
+		tracker.observe(SLOT, SessionTracker.SlotPhase.DONE_SELL, ITEM, 100, 110_000);
+		assertNull(tracker.avgBuyPriceOf(ITEM));
+
+		// And reset clears any remaining position.
+		tracker.observe(SLOT, SessionTracker.SlotPhase.ACTIVE_BUY, ITEM, 0, 0);
+		tracker.observe(SLOT, SessionTracker.SlotPhase.DONE_BUY, ITEM, 10, 10_000);
+		tracker.reset(0);
+		assertNull(tracker.avgBuyPriceOf(ITEM));
+	}
 }
