@@ -73,6 +73,35 @@ public final class FastFlipSelection
 		return new FastFlipSelection(Source.NONE, new ArrayList<>());
 	}
 
+	/**
+	 * Extended pick (v0.8.18) — the paginated suggestion list. Same honest
+	 * ordering as {@link #select}, but instead of stopping at the winning
+	 * section it CONCATENATES them: the Top ranking first, then the fast-buy
+	 * and fast-sell candidates fill the remainder (de-duplicated by itemId,
+	 * order preserved) up to {@code max}. The source reports where the
+	 * LEADING rows came from ({@link Source#TOP} when the Top ranking has
+	 * items, {@link Source#GENERAL} when only the fallback lists do), so the
+	 * card heading keeps its meaning. Display only, like {@link #select}.
+	 */
+	public static FastFlipSelection selectExtended(
+		RuneFlipData.FastFlipOverviewResponse response, int max)
+	{
+		if (response == null || max <= 0)
+		{
+			return new FastFlipSelection(Source.NONE, new ArrayList<>());
+		}
+		List<RuneFlipData.FastFlipItem> rows = mergeDistinct(
+			Arrays.asList(response.topFlips, response.fastBuy, response.fastSell),
+			max);
+		if (rows.isEmpty())
+		{
+			return new FastFlipSelection(Source.NONE, rows);
+		}
+		Source source = take(response.topFlips, 1).isEmpty()
+			? Source.GENERAL : Source.TOP;
+		return new FastFlipSelection(source, rows);
+	}
+
 	/** First {@code max} non-null items of a list (null-safe copy). */
 	private static List<RuneFlipData.FastFlipItem> take(
 		List<RuneFlipData.FastFlipItem> items, int max)
@@ -107,8 +136,15 @@ public final class FastFlipSelection
 		List<RuneFlipData.FastFlipItem> second,
 		int max)
 	{
+		return mergeDistinct(Arrays.asList(first, second), max);
+	}
+
+	/** Same merge over any number of lists, in the given priority order. */
+	private static List<RuneFlipData.FastFlipItem> mergeDistinct(
+		List<List<RuneFlipData.FastFlipItem>> lists, int max)
+	{
 		Map<Integer, RuneFlipData.FastFlipItem> byId = new LinkedHashMap<>();
-		for (List<RuneFlipData.FastFlipItem> list : Arrays.asList(first, second))
+		for (List<RuneFlipData.FastFlipItem> list : lists)
 		{
 			if (list == null)
 			{

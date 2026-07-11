@@ -161,11 +161,14 @@ public class RuneFlipCompanionPlugin extends Plugin
 	 *  editor-validated inside the service. */
 	private GeFieldAssistService fieldAssist;
 	/** The ONLY runner of the GE search SELECT script (v0.8.17); every
-	 *  select is click-time gated inside the service (#1 primary only). */
+	 *  select is click-time gated inside the service (selected suggestion
+	 *  only). */
 	private GeSearchAssistService searchAssist;
-	/** #1 of the last rendered Fast Flip selection — the single primary GE
-	 *  suggestion (v0.8.10). #2/#3 are never stored: they cannot assist. */
-	private volatile RuneFlipData.FastFlipItem primaryFlip;
+	/** The selected GE suggestion (v0.8.18): the row the user clicked in the
+	 *  panel, or the default (first row of the panel's current page). Always
+	 *  an item of the rendered suggestion list — never an unloaded item —
+	 *  and the ONLY suggestion the field/search assist may ever offer. */
+	private volatile RuneFlipData.FastFlipItem selectedSuggestion;
 	/** Context of the item currently open in the GE setup (when fetched),
 	 *  used to source qty/price for that exact item. */
 	private volatile RuneFlipData.FastFlipItemContextResponse lastItemContext;
@@ -235,7 +238,7 @@ public class RuneFlipCompanionPlugin extends Plugin
 		{
 			panel = new RuneFlipPanel(
 				itemManager, this::refreshPanel, pairingActions(),
-				designActions(), isPaired());
+				designActions(), geSuggestionActions(), isPaired());
 			navButton = NavigationButton.builder()
 				.tooltip("RuneFlip")
 				.icon(buildNavIcon())
@@ -459,9 +462,9 @@ public class RuneFlipCompanionPlugin extends Plugin
 	/**
 	 * Explicit GE Field Assist (v0.8.11) — the DISPLAY half. When the user
 	 * right-clicks while a GE editor is open, this adds a "RuneFlip: …" menu
-	 * OPTION for exactly one field of exactly the open item: select the #1
-	 * primary suggestion in the item search, or set that item's qty/price in
-	 * the chatbox editor. Adding an option is not an action — nothing happens
+	 * OPTION for exactly one field of exactly the open item: prepare the
+	 * selected GE suggestion's name in the item search, or set that item's
+	 * qty/price in the chatbox editor. Adding an option is not an action — nothing happens
 	 * unless the USER clicks it, and the click lands in
 	 * {@link GeFieldAssistService}, which re-validates the editor and the
 	 * USER_CLICK source before preparing the value. It never submits,
@@ -478,8 +481,9 @@ public class RuneFlipCompanionPlugin extends Plugin
 			return;
 		}
 
-		// GE item search: offer the #1 primary suggestion (never #2/#3).
-		RuneFlipData.FastFlipItem primary = primaryFlip;
+		// GE item search: offer the selected GE suggestion (the row the user
+		// picked in the panel, or the default first row of its current page).
+		RuneFlipData.FastFlipItem primary = selectedSuggestion;
 		if (assist.isItemSearchOpen())
 		{
 			if (primary != null && primary.itemName != null)
@@ -539,9 +543,10 @@ public class RuneFlipCompanionPlugin extends Plugin
 	/**
 	 * Visible chatbox hint (v0.8.13, Copilot-style): while a GE editor is
 	 * open, one display-only text line inside the chatbox names the assist —
-	 * "RuneFlip item: …" on the search (always the #1 primary suggestion,
-	 * never #2/#3), "Press [key] to set RuneFlip price/quantity: …" on the
-	 * value editors. Rendering a hint is display, not an action: the value
+	 * "RuneFlip item: …" on the search (the SELECTED GE suggestion since
+	 * v0.8.18: the row the user clicked, or the default first row of the
+	 * panel's current page), "Press [key] to set RuneFlip price/quantity: …"
+	 * on the value editors. Rendering a hint is display, not an action: the value
 	 * is prepared only by the user's own click on the hint or the hotkey,
 	 * both landing in the gated {@link GeFieldAssistService}. Runs on the
 	 * game tick (client thread); unknown editors show nothing.
@@ -569,7 +574,7 @@ public class RuneFlipCompanionPlugin extends Plugin
 
 		GeFieldAssist.Field field = assist.activeField();
 		String keyLabel = config.geFieldAssistHotkey().toString();
-		RuneFlipData.FastFlipItem primary = primaryFlip;
+		RuneFlipData.FastFlipItem primary = selectedSuggestion;
 		String primaryName = primary == null ? null : primary.itemName;
 		Long qty = field == GeFieldAssist.Field.QUANTITY
 			? GeFieldAssist.qtyFor(lastSelectedGeItem, lastItemContext, primary)
@@ -586,12 +591,13 @@ public class RuneFlipCompanionPlugin extends Plugin
 		if (text != null && field == GeFieldAssist.Field.ITEM_SEARCH
 			&& select != null)
 		{
-			// The functional row (v0.8.17): the user's click SELECTS the #1
-			// primary into the open search — gated at click time inside the
-			// service (USER_CLICK + search open + id == #1 only). No
-			// price/qty is set by this flow and no offer is confirmed.
+			// The functional row (v0.8.17): the user's click SELECTS the
+			// selected suggestion into the open search — gated at click time
+			// inside the service (USER_CLICK + search open + id == selected
+			// suggestion only). No price/qty is set by this flow and no
+			// offer is confirmed.
 			RuneFlipData.FastFlipItem item = primary;
-			onClick = () -> select.selectPrimaryItem(
+			onClick = () -> select.selectSuggestedItem(
 				item, item.itemId, GeFieldAssist.ActionSource.USER_CLICK);
 		}
 		else if (text != null && field == GeFieldAssist.Field.QUANTITY)
@@ -669,7 +675,7 @@ public class RuneFlipCompanionPlugin extends Plugin
 				return;
 			}
 			GeFieldAssist.Field field = assist.activeField();
-			RuneFlipData.FastFlipItem primary = primaryFlip;
+			RuneFlipData.FastFlipItem primary = selectedSuggestion;
 			if (field == GeFieldAssist.Field.ITEM_SEARCH)
 			{
 				if (primary != null && primary.itemName != null)
@@ -1032,6 +1038,64 @@ public class RuneFlipCompanionPlugin extends Plugin
 		};
 	}
 
+	/**
+	 * Selectable-suggestion callbacks (v0.8.18). The panel reports which of
+	 * its VISIBLE rows is the selected GE suggestion; only the user's own
+	 * click may additionally reach the search assist — and even that click is
+	 * re-validated at click time inside the gated service. Official rule:
+	 * RuneFlip can prepare GE fields after explicit user action, but must
+	 * never submit or execute the offer.
+	 */
+	private RuneFlipPanel.GeSuggestionActions geSuggestionActions()
+	{
+		return new RuneFlipPanel.GeSuggestionActions()
+		{
+			@Override
+			public void onSuggestionClicked(RuneFlipData.FastFlipItem item)
+			{
+				selectedSuggestion = item;
+				prepareSelectedSuggestion(item);
+			}
+
+			@Override
+			public void onSuggestionChanged(RuneFlipData.FastFlipItem item)
+			{
+				// Bookkeeping only: the in-game "RuneFlip item: …" hint
+				// mirrors the panel's effective selection (pinned row, or the
+				// first row of the current page). Nothing is prepared here.
+				selectedSuggestion = item;
+			}
+		};
+	}
+
+	/**
+	 * The user's own click on a visible suggestion row (v0.8.18). Hops to the
+	 * client thread and lets the search assist re-validate EVERYTHING at
+	 * click time (USER_CLICK + GE search open + id == selected suggestion).
+	 * With the search closed nothing runs — the selection is kept and the
+	 * panel shows "Open GE search to use this item." instead. This flow never
+	 * sets price/quantity and never submits, confirms, cancels or collects.
+	 */
+	private void prepareSelectedSuggestion(RuneFlipData.FastFlipItem item)
+	{
+		RuneFlipPanel target = panel;
+		clientThread.invoke(() ->
+		{
+			GeSearchAssistService select = searchAssist;
+			boolean assistOn = config.enableGeFieldAssist();
+			boolean prepared = assistOn && select != null && item != null
+				&& select.selectSuggestedItem(
+					item, item.itemId, GeFieldAssist.ActionSource.USER_CLICK);
+			if (target != null)
+			{
+				String hint = prepared || !assistOn
+					? null : RuneFlipPanel.OPEN_GE_SEARCH_HINT;
+				SwingUtilities.invokeLater(
+					() -> target.showGeSuggestionHint(hint));
+			}
+		});
+	}
+
 	private RuneFlipPanel.PairingActions pairingActions()
 	{
 		return new RuneFlipPanel.PairingActions()
@@ -1245,7 +1309,7 @@ public class RuneFlipCompanionPlugin extends Plugin
 			overviewCache.get(strategyQuery, System.currentTimeMillis());
 		if (cached != null)
 		{
-			rememberPrimary(cached);
+			rememberSuggestions(cached);
 			SwingUtilities.invokeLater(
 				() -> target.updateFastFlip(cached));
 			return;
@@ -1282,7 +1346,7 @@ public class RuneFlipCompanionPlugin extends Plugin
 							logFastFlip("", fallback);
 							overviewCache.put("", fallback,
 								System.currentTimeMillis());
-							rememberPrimary(fallback);
+							rememberSuggestions(fallback);
 							SwingUtilities.invokeLater(() ->
 								target.updateFastFlip(fallback, true));
 						},
@@ -1292,13 +1356,13 @@ public class RuneFlipCompanionPlugin extends Plugin
 							{
 								return;
 							}
-							rememberPrimary(response);
+							rememberSuggestions(response);
 							SwingUtilities.invokeLater(() ->
 								target.updateFastFlip(response, false));
 						});
 					return;
 				}
-				rememberPrimary(response);
+				rememberSuggestions(response);
 				SwingUtilities.invokeLater(
 					() -> target.updateFastFlip(response));
 			},
@@ -1316,23 +1380,27 @@ public class RuneFlipCompanionPlugin extends Plugin
 					BackendUrl.normalize(url),
 					strategyQuery == null || strategyQuery.isEmpty()
 						? "default" : strategyQuery);
-				rememberPrimary(null);
+				rememberSuggestions(null);
 				SwingUtilities.invokeLater(
 					() -> target.updateFastFlip(null));
 			});
 	}
 
 	/**
-	 * Remembers the #1 of the selection the panel is about to render — the
-	 * single primary GE suggestion (v0.8.10) and the only Top-3 entry the
-	 * field assist (v0.8.11) may ever offer. Empty/offline selections clear
-	 * it, so a stale #1 can never be offered.
+	 * Remembers the suggestion list the panel is about to render (v0.8.18,
+	 * extended selection) and refreshes the selected GE suggestion against
+	 * it: a user-picked item stays selected while the backend still lists it
+	 * (fresh figures), anything else falls back to the first row, and an
+	 * empty/offline selection clears it — a stale suggestion can never be
+	 * offered. The panel refines the default (first row of ITS current page)
+	 * right after, via {@code onSuggestionChanged}.
 	 */
-	private void rememberPrimary(RuneFlipData.FastFlipOverviewResponse response)
+	private void rememberSuggestions(RuneFlipData.FastFlipOverviewResponse response)
 	{
-		FastFlipSelection selection =
-			FastFlipSelection.select(response, RuneFlipPanel.MAX_FAST_FLIP_ROWS);
-		primaryFlip = selection.rows.isEmpty() ? null : selection.rows.get(0);
+		FastFlipSelection selection = FastFlipSelection.selectExtended(
+			response, RuneFlipPanel.MAX_FAST_FLIP_ITEMS);
+		selectedSuggestion =
+			SuggestionPager.retainSelection(selection.rows, selectedSuggestion);
 	}
 
 	/**
@@ -1374,7 +1442,7 @@ public class RuneFlipCompanionPlugin extends Plugin
 		String strategy = strategyQuery == null || strategyQuery.isEmpty()
 			? "default" : strategyQuery;
 		log.debug(
-			"RuneFlip Fast Flip: GET /fast-flip/overview?limit=3 strategy={} "
+			"RuneFlip Fast Flip: GET /fast-flip/overview?limit=12 strategy={} "
 				+ "top={} fastBuy={} fastSell={}",
 			strategy, top, fastBuy, fastSell);
 	}

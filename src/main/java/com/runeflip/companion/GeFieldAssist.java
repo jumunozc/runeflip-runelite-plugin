@@ -14,9 +14,10 @@ package com.runeflip.companion;
  *       valid GE editor may proceed; anything automatic/background is
  *       rejected before a value is even resolved.</li>
  *   <li>{@link #qtyFor}/{@link #priceFor} — values exist ONLY for the item
- *       the user actually has open: the selected-item context, or the #1
- *       primary suggestion when that is the open item. #2/#3 of the Top 3
- *       can never feed an assist (they are informational only).</li>
+ *       the user actually has open: the selected-item context, or the
+ *       selected GE suggestion when that IS the open item. A panel
+ *       selection for a DIFFERENT item than the open one never feeds a
+ *       qty/price assist (v0.8.18) — no other suggestion row ever can.</li>
  * </ul>
  */
 final class GeFieldAssist
@@ -67,29 +68,32 @@ final class GeFieldAssist
 	}
 
 	/**
-	 * Gate for the clickable "RuneFlip item:" search row (v0.8.17) — the
+	 * Gate for the GE search select (v0.8.17, selectable rows v0.8.18) — the
 	 * ONLY path that may select an item into the GE search, and the
 	 * strictest gate in the plugin. Every condition must hold:
 	 * <ul>
 	 *   <li>{@link ActionSource#USER_CLICK} only — the user's own click on
-	 *       the row itself. Unlike the field prepares, even the hotkey is
+	 *       the in-game "RuneFlip item:" row or on a VISIBLE side-panel
+	 *       suggestion row. Unlike the field prepares, even the hotkey is
 	 *       rejected here (the hotkey keeps its prepare-search-TEXT
 	 *       semantics); AUTOMATIC/background is rejected as always.</li>
 	 *   <li>the GE item search must be open right now;</li>
 	 *   <li>the item id must be valid;</li>
-	 *   <li>the item must BE the #1 primary suggestion — #2/#3 of the Top 3
-	 *       (or any other item) can never activate the search assist.</li>
+	 *   <li>the item must BE the selected GE suggestion — the row the user
+	 *       explicitly picked (or the default first row of the panel's
+	 *       current page). Any other item — hidden pages and unloaded items
+	 *       included — can never activate the search assist.</li>
 	 * </ul>
 	 * Selecting only loads the item into the offer setup — price/quantity
 	 * are never set by this flow and the offer is never confirmed.
 	 */
 	static boolean canSelectSearchItem(
-		ActionSource source, boolean searchOpen, int itemId, int primaryItemId)
+		ActionSource source, boolean searchOpen, int itemId, int selectedItemId)
 	{
 		return source == ActionSource.USER_CLICK
 			&& searchOpen
 			&& itemId > 0
-			&& itemId == primaryItemId;
+			&& itemId == selectedItemId;
 	}
 
 	/**
@@ -177,9 +181,10 @@ final class GeFieldAssist
 	/**
 	 * Quantity to offer for the item the user has OPEN in the GE setup, or
 	 * null when there is nothing RuneFlip stands behind. Sources, in order:
-	 * the selected-item context (when it is for the open item), then the #1
-	 * primary suggestion (when the open item IS the #1). Any other item —
-	 * including #2/#3 of the Top 3 — gets no assist.
+	 * the selected-item context (when it is for the open item), then the
+	 * selected GE suggestion (when the open item IS that suggestion). Any
+	 * other item — a panel selection different from the open item included —
+	 * gets no assist.
 	 */
 	static Long qtyFor(
 		int openItemId,
@@ -211,7 +216,7 @@ final class GeFieldAssist
 	 * Price to offer for the OPEN item, or null. A buy offer uses the
 	 * recommended/target BUY leg, a sell offer the SELL leg — never crossed.
 	 * Same source rule as {@link #qtyFor}: selected-item context first, then
-	 * the #1 primary suggestion when it is the open item; never #2/#3.
+	 * the selected GE suggestion when it IS the open item; never any other.
 	 */
 	static Long priceFor(
 		int openItemId,
@@ -286,9 +291,9 @@ final class GeFieldAssist
 
 	/**
 	 * The full visible-hint model (v0.8.14): which text — if any — the
-	 * chatbox hint shows for the active editor. Search shows the #1 primary
-	 * suggestion by name (never #2/#3 — the caller only ever holds the
-	 * primary); the value editors show the press-hotkey copy for their
+	 * chatbox hint shows for the active editor. Search shows the selected
+	 * GE suggestion by name (the caller only ever holds that one
+	 * suggestion); the value editors show the press-hotkey copy for their
 	 * value. A missing value or an unidentified/closed editor returns null,
 	 * which REMOVES the hint. Display only — showing a hint performs no
 	 * action.
@@ -310,8 +315,9 @@ final class GeFieldAssist
 		}
 	}
 
-	/** GE search hint: "RuneFlip item: Death rune" — always the #1 primary
-	 *  suggestion, never #2/#3. */
+	/** GE search hint: "RuneFlip item: Death rune" — always the selected GE
+	 *  suggestion (the user's pick, or the default first row of the panel's
+	 *  current page). */
 	static String searchHint(String itemName)
 	{
 		return "RuneFlip item: " + RuneFlipPanel.sanitizeName(itemName);

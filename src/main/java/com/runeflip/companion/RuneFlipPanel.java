@@ -28,10 +28,12 @@ import net.runelite.client.util.QuantityFormatter;
 /**
  * RuneFlip sidebar — an INFORMATIONAL mirror of what the user's own backend
  * computed (recommendations, capital, completed offers). Read-only by
- * construction: the only interactions are Refresh (re-fetch), Copy
- * (clipboard) and Open Wiki (external browser). Nothing here can click,
- * type, trade or otherwise touch the game — see
- * docs/runelite-readonly-contract.md.
+ * construction: the interactions are Refresh (re-fetch), Copy (clipboard),
+ * Open Wiki (external browser) and — since v0.8.18 — selecting a visible
+ * suggestion row ("Use in GE"), which only records the choice and hands it
+ * to the plugin's click-time-gated GE assist. The panel itself never writes
+ * into the game — see docs/runelite-readonly-contract.md and
+ * docs/anti-bot-compliance.md.
  */
 public class RuneFlipPanel extends PluginPanel
 {
@@ -61,6 +63,27 @@ public class RuneFlipPanel extends PluginPanel
 	private final Runnable onRefresh;
 	private final PairingActions pairingActions;
 	private final DesignActions designActions;
+	private final GeSuggestionActions geSuggestionActions;
+
+	// ── Selectable, paginated suggestions (v0.8.18) ─────────────────────────
+	/** Extended suggestion list of the LAST rendered response (up to
+	 *  {@link #MAX_FAST_FLIP_ITEMS}); the card shows it in pages of
+	 *  {@link #MAX_FAST_FLIP_ROWS}. */
+	private List<RuneFlipData.FastFlipItem> fastFlipRows = new java.util.ArrayList<>();
+	private FastFlipSelection.Source fastFlipSource = FastFlipSelection.Source.NONE;
+	/** Last response + fallback flag, kept so page flips and row clicks can
+	 *  re-render WITHOUT a fetch (pure display state). */
+	private RuneFlipData.FastFlipOverviewResponse lastFastFlipResponse;
+	private boolean lastDefaultFallback;
+	/** Current suggestion page (0-based); clamped after every refresh so a
+	 *  shrunken list never strands the user on an empty page. */
+	private int fastFlipPage;
+	/** ItemId the user explicitly clicked ("pinned"); null = no manual
+	 *  selection → the default is the first row of the current page. */
+	private Integer pinnedSuggestionId;
+	/** Transient guidance under the rows ("Open GE search to use this
+	 *  item."); null = hidden. Set by the plugin after a row click. */
+	private String geSuggestionHint;
 
 	private final JLabel statusLabel = new JLabel("Offline");
 	private final JLabel capitalLabel = new JLabel(" ");
@@ -113,9 +136,14 @@ public class RuneFlipPanel extends PluginPanel
 
 	/** Rows shown in the compact completed summary; the rest is "+n more". */
 	private static final int MAX_COMPLETED_ROWS = 3;
-	/** Entries shown in the compact Fast Flip card (backend sends up to 3).
-	 *  Package-visible so the plugin can pre-check a response with the same cap. */
+	/** Entries shown PER PAGE in the compact Fast Flip card (v0.8.18) — the
+	 *  classic Top 3 view is page one. Package-visible so the plugin can
+	 *  pre-check a response with the same cap. */
 	static final int MAX_FAST_FLIP_ROWS = 3;
+	/** Cap of the whole paginated suggestion list (v0.8.18): up to 4 pages of
+	 *  3 — enough choice without a heavy sidebar. Package-visible so the
+	 *  plugin remembers the same extended list the panel renders. */
+	static final int MAX_FAST_FLIP_ITEMS = 12;
 	/** Shown verbatim when the backend omits its own disclaimer string. */
 	static final String FAST_FLIP_DISCLAIMER =
 		"Fast flip estimates are informational. Review manually before trading.";
@@ -123,20 +151,26 @@ public class RuneFlipPanel extends PluginPanel
 	static final String PRICE_EDGE_DISCLAIMER =
 		"Targets are estimates. Review manually.";
 	/**
-	 * Primary GE suggestion chip (v0.8.10) — the compact marker on the FIRST
-	 * row of the Fast Flip list. The #1 item is RuneFlip's single primary
-	 * suggestion for the user's next manual GE search, Flipping-Copilot style;
-	 * #2/#3 stay informational and are never selectable as a suggestion.
+	 * Selected GE suggestion chip (v0.8.18) — the compact marker on the row
+	 * the user picked (or the safe default: the first row of the current
+	 * page). Every visible row is selectable via its {@link #USE_IN_GE_LABEL}
+	 * button; the click makes that row the ONE suggestion the GE assist may
+	 * prepare.
 	 *
-	 * <p>The chip itself is DISPLAY-ONLY. Since v0.8.11 the #1 can also be
-	 * prepared into the in-game GE item search — but only through the
-	 * "RuneFlip: select …" right-click option and only on the user's explicit
-	 * click, encapsulated in {@link GeFieldAssistService} (official rule:
-	 * RuneFlip can prepare GE fields after explicit user action, but must
-	 * never submit or execute the offer). The panel writes nothing into the
-	 * game.
+	 * <p>The chip itself is DISPLAY-ONLY, and the panel writes nothing into
+	 * the game: the row click only records the selection and hands it to the
+	 * plugin, where the actual prepare stays behind the click-time gate in
+	 * {@link GeFieldAssistService}/{@link GeSearchAssistService} (official
+	 * rule: RuneFlip can prepare GE fields after explicit user action, but
+	 * must never submit or execute the offer).
 	 */
-	static final String GE_SUGGESTION_CHIP = "GE suggestion";
+	static final String GE_SELECTED_CHIP = "GE selected";
+	/** Button label on every non-selected visible row (v0.8.18): the explicit
+	 *  click that makes that row the selected GE suggestion. */
+	static final String USE_IN_GE_LABEL = "Use in GE";
+	/** Shown after a row click while the GE search is NOT open (v0.8.18): the
+	 *  selection is kept; the user opens the search manually to use it. */
+	static final String OPEN_GE_SEARCH_HINT = "Open GE search to use this item.";
 	/** Short contextual-card footer (v0.8.5) — the compliance rule, compact. */
 	static final String SHORT_DISCLAIMER = "Review manually.";
 	/** Sell-context warning (v0.8.12): shown amber (zero) / red (negative)
@@ -191,7 +225,7 @@ public class RuneFlipPanel extends PluginPanel
 	private static final int MAX_NAME_CHARS = 40;
 	/** Shown in the header next to the wordmark (v0.8.7 design). Must match
 	 *  build.gradle's version — pinned by RuneFlipPanelTextTest. */
-	static final String PLUGIN_VERSION = "0.8.17";
+	static final String PLUGIN_VERSION = "0.8.18";
 
 	/**
 	 * Pairing callbacks implemented by the plugin (v0.6.3). Both are
@@ -221,17 +255,35 @@ public class RuneFlipPanel extends PluginPanel
 		void onSessionReset();
 	}
 
+	/**
+	 * Selected-GE-suggestion callbacks (v0.8.18), implemented by the plugin.
+	 * {@code onSuggestionClicked} fires ONLY on the user's own click on a
+	 * visible row — the one panel event that may reach the (click-time gated)
+	 * GE search assist. {@code onSuggestionChanged} mirrors the effective
+	 * selection (default = first row of the current page) so the in-game
+	 * hint names the right item; it is bookkeeping only and never prepares
+	 * anything.
+	 */
+	interface GeSuggestionActions
+	{
+		void onSuggestionClicked(RuneFlipData.FastFlipItem item);
+
+		void onSuggestionChanged(RuneFlipData.FastFlipItem item);
+	}
+
 	public RuneFlipPanel(
 		ItemManager itemManager,
 		Runnable onRefresh,
 		PairingActions pairingActions,
 		DesignActions designActions,
+		GeSuggestionActions geSuggestionActions,
 		boolean initiallyPaired)
 	{
 		this.itemManager = itemManager;
 		this.onRefresh = onRefresh;
 		this.pairingActions = pairingActions;
 		this.designActions = designActions;
+		this.geSuggestionActions = geSuggestionActions;
 		this.pairButton = smallButton("Pair");
 		this.unpairButton = smallButton("Unpair");
 
@@ -1268,7 +1320,12 @@ public class RuneFlipPanel extends PluginPanel
 		RuneFlipData.FastFlipOverviewResponse response,
 		boolean defaultFallback)
 	{
-		fastFlipCard.removeAll();
+		// Store the display state (v0.8.18): page flips and row clicks re-render
+		// from it without a fetch; a fresh response replaces it wholesale.
+		lastFastFlipResponse = response;
+		lastDefaultFallback = defaultFallback;
+		geSuggestionHint = null;
+
 		// A rendered response ends the in-flight indicator (v0.8.10); stale
 		// responses never reach here (the plugin drops them by sequence).
 		updatingLabel.setVisible(false);
@@ -1284,27 +1341,55 @@ public class RuneFlipPanel extends PluginPanel
 			buildStrategyPill();
 		}
 
-		// Choose rows honestly (v0.8.5-c): Top ranking first, then the fast-buy/
-		// -sell candidates as "General ideas", then the informative empty state.
-		// Fixes the panel showing "Fast flip · 0" whenever a restrictive saved
-		// strategy emptied ONLY the Top list while the overview still had ideas.
+		// Choose rows honestly (v0.8.5-c, extended v0.8.18): the Top ranking
+		// leads, the fast-buy/-sell candidates fill the later pages, then the
+		// informative empty state. Fixes the panel showing "Fast flip · 0"
+		// whenever a restrictive saved strategy emptied ONLY the Top list
+		// while the overview still had ideas.
 		FastFlipSelection selection =
-			FastFlipSelection.select(response, MAX_FAST_FLIP_ROWS);
-		int shown = selection.rows.size();
-		fastFlipHeader.setText(headerTitleOf(selection.source, shown).toUpperCase());
+			FastFlipSelection.selectExtended(response, MAX_FAST_FLIP_ITEMS);
+		fastFlipRows = selection.rows;
+		fastFlipSource = selection.source;
 
-		if (selection.source == FastFlipSelection.Source.NONE)
+		// Refresh hygiene (v0.8.18): a page left beyond the shrunken list
+		// clamps back to the last valid one, and a pinned item the backend
+		// stopped listing un-pins (an unloaded item can never stay selected).
+		fastFlipPage = SuggestionPager.clampPage(
+			fastFlipPage, fastFlipRows.size(), MAX_FAST_FLIP_ROWS);
+		if (pinnedSuggestionId != null
+			&& SuggestionPager.byItemId(fastFlipRows, pinnedSuggestionId) == null)
+		{
+			pinnedSuggestionId = null;
+		}
+
+		renderFastFlip();
+	}
+
+	/**
+	 * Renders the Fast Flip card from the STORED display state (v0.8.18) —
+	 * shared by response refreshes, page flips and row clicks. Pure display:
+	 * the only game-relevant output is the effective-selection callback, and
+	 * that is bookkeeping the plugin gates again at click time.
+	 */
+	private void renderFastFlip()
+	{
+		fastFlipCard.removeAll();
+		fastFlipHeader.setText(
+			headerTitleOf(fastFlipSource, fastFlipRows.size()).toUpperCase());
+
+		if (fastFlipSource == FastFlipSelection.Source.NONE)
 		{
 			// A failed fetch is NOT "no matches" (v0.8.6): blaming the strategy
 			// for a network/HTTP failure sent users relaxing filters for nothing.
-			if (response == null)
+			if (lastFastFlipResponse == null)
 			{
 				buildFastFlipOfflineState();
 			}
 			else
 			{
-				buildFastFlipEmptyState(response);
+				buildFastFlipEmptyState(lastFastFlipResponse);
 			}
+			notifyGeSuggestion(null);
 			revalidateAll();
 			return;
 		}
@@ -1312,7 +1397,7 @@ public class RuneFlipPanel extends PluginPanel
 		// Saved-strategy fallback note (v0.8.6): these rows come from a default-
 		// strategy re-fetch, said explicitly so the strategy line below (the
 		// default echo) cannot be mistaken for the saved strategy.
-		if (defaultFallback)
+		if (lastDefaultFallback)
 		{
 			fastFlipCard.add(mutedLine(DEFAULT_FALLBACK_NOTE));
 			fastFlipCard.add(Box.createVerticalStrut(4));
@@ -1321,7 +1406,7 @@ public class RuneFlipPanel extends PluginPanel
 		// Compact strategy echo (v0.8.6): "8h · HIGH risk" — the full backend
 		// description stays in the empty state, where the filter is the point.
 		String strategyLine = compactStrategyLine(
-			response == null ? null : response.strategy);
+			lastFastFlipResponse == null ? null : lastFastFlipResponse.strategy);
 		if (strategyLine != null)
 		{
 			fastFlipCard.add(mutedLine(strategyLine));
@@ -1332,40 +1417,128 @@ public class RuneFlipPanel extends PluginPanel
 		// the current strategy, so these are liquid fast-buy/-sell candidates —
 		// say so, never pass them off as top-ranked flips. The header already
 		// reads "General ideas" (v0.8.6); this line explains why.
-		if (selection.source == FastFlipSelection.Source.GENERAL)
+		if (fastFlipSource == FastFlipSelection.Source.GENERAL)
 		{
 			fastFlipCard.add(mutedLine(
 				"No Top match for your strategy — showing liquid candidates."));
 			fastFlipCard.add(Box.createVerticalStrut(4));
 		}
 
-		for (int i = 0; i < shown; i++)
+		// Pagination bar (v0.8.18) — only when there is more than one page.
+		if (fastFlipRows.size() > MAX_FAST_FLIP_ROWS)
+		{
+			fastFlipCard.add(suggestionPaginationRow());
+			fastFlipCard.add(Box.createVerticalStrut(4));
+		}
+
+		// The effective selection: the pinned row while it is still listed,
+		// else the first row of the CURRENT page — always a visible, loaded
+		// item, never anything outside the list.
+		RuneFlipData.FastFlipItem selected = SuggestionPager.effectiveSelection(
+			fastFlipRows, pinnedSuggestionId, fastFlipPage, MAX_FAST_FLIP_ROWS);
+
+		List<RuneFlipData.FastFlipItem> visible = SuggestionPager.pageRows(
+			fastFlipRows, fastFlipPage, MAX_FAST_FLIP_ROWS);
+		for (int i = 0; i < visible.size(); i++)
 		{
 			if (i > 0)
 			{
 				fastFlipCard.add(Box.createVerticalStrut(6));
 			}
-			RuneFlipData.FastFlipItem flip = selection.rows.get(i);
-			fastFlipCard.add(fastFlipEntry(flip, i + 1,
-				isPrimaryGeSuggestion(selection.source, i + 1)));
+			RuneFlipData.FastFlipItem flip = visible.get(i);
+			int rank = fastFlipPage * MAX_FAST_FLIP_ROWS + i + 1;
+			fastFlipCard.add(fastFlipEntry(flip, rank,
+				selected != null && selected.itemId == flip.itemId));
+		}
+
+		// Post-click guidance ("Open GE search to use this item.") — set by
+		// the plugin after a row click found the search closed.
+		if (geSuggestionHint != null)
+		{
+			fastFlipCard.add(Box.createVerticalStrut(4));
+			JLabel hint = new JLabel(html(
+				"<span style='color:#e8a04a'>" + safe(geSuggestionHint) + "</span>"));
+			hint.setFont(FontManager.getRunescapeSmallFont());
+			hint.setAlignmentX(LEFT_ALIGNMENT);
+			fastFlipCard.add(hint);
 		}
 
 		fastFlipCard.add(Box.createVerticalStrut(6));
+		notifyGeSuggestion(selected);
 		revalidateAll();
 	}
 
-	/**
-	 * Whether one Fast Flip row is THE primary GE suggestion (v0.8.10): always
-	 * — and only — the FIRST rendered row of the current selection, whichever
-	 * list it came from (Top ranking or the "General ideas" fallback). #2/#3
-	 * are informational and can never be picked as a suggestion; the empty and
-	 * offline states have no suggestion at all. The same rule feeds the
-	 * plugin's field assist (v0.8.11): only this #1 may ever be offered as the
-	 * click-gated "RuneFlip: select …" option — see {@link #GE_SUGGESTION_CHIP}.
-	 */
-	static boolean isPrimaryGeSuggestion(FastFlipSelection.Source source, int rank)
+	/** Mirrors the effective selection to the plugin (bookkeeping only — the
+	 *  in-game hint names this item; nothing is prepared by this call). */
+	private void notifyGeSuggestion(RuneFlipData.FastFlipItem selected)
 	{
-		return source != FastFlipSelection.Source.NONE && rank == 1;
+		if (geSuggestionActions != null)
+		{
+			geSuggestionActions.onSuggestionChanged(selected);
+		}
+	}
+
+	/**
+	 * The user's own click on a visible row (v0.8.18): pin that row as the
+	 * selected GE suggestion and hand it to the plugin — the ONLY panel event
+	 * that may reach the GE search assist, which re-validates everything
+	 * (USER_CLICK + search open + id match) at click time.
+	 */
+	private void onSuggestionRowClicked(RuneFlipData.FastFlipItem flip)
+	{
+		pinnedSuggestionId = flip.itemId;
+		geSuggestionHint = null;
+		renderFastFlip();
+		if (geSuggestionActions != null)
+		{
+			geSuggestionActions.onSuggestionClicked(flip);
+		}
+	}
+
+	/** Post-click guidance under the rows; null hides it. Called by the
+	 *  plugin on the EDT after the click-time gate ran. */
+	void showGeSuggestionHint(String hint)
+	{
+		geSuggestionHint = hint;
+		renderFastFlip();
+	}
+
+	/** "Suggestions 1–3" + compact ◀ ▶ page controls (v0.8.18). Plain
+	 *  JButtons (ActionListener) — never a low-level input API. */
+	private JPanel suggestionPaginationRow()
+	{
+		JPanel row = new JPanel(new BorderLayout(6, 0));
+		row.setOpaque(false);
+		row.setAlignmentX(LEFT_ALIGNMENT);
+		JLabel label = new JLabel(SuggestionPager.pageLabel(
+			fastFlipPage, fastFlipRows.size(), MAX_FAST_FLIP_ROWS));
+		label.setFont(FontManager.getRunescapeSmallFont());
+		label.setForeground(MUTED);
+		row.add(label, BorderLayout.WEST);
+
+		JPanel controls = new JPanel(new FlowLayout(FlowLayout.RIGHT, 2, 0));
+		controls.setOpaque(false);
+		JButton prev = linkButton("◀", GOLD, () -> flipSuggestionPage(-1));
+		prev.setToolTipText("Previous suggestions");
+		prev.setEnabled(SuggestionPager.hasPrevious(fastFlipPage));
+		controls.add(prev);
+		JButton next = linkButton("▶", GOLD, () -> flipSuggestionPage(1));
+		next.setToolTipText("Next suggestions");
+		next.setEnabled(SuggestionPager.hasNext(
+			fastFlipPage, fastFlipRows.size(), MAX_FAST_FLIP_ROWS));
+		controls.add(next);
+		row.add(controls, BorderLayout.EAST);
+		row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 20));
+		return row;
+	}
+
+	/** Page flip (v0.8.18): pure display state. A pinned selection is never
+	 *  stolen by paging; without a pin the default follows the new page. */
+	private void flipSuggestionPage(int delta)
+	{
+		fastFlipPage = SuggestionPager.clampPage(
+			fastFlipPage + delta, fastFlipRows.size(), MAX_FAST_FLIP_ROWS);
+		renderFastFlip();
 	}
 
 	/**
@@ -1550,24 +1723,24 @@ public class RuneFlipPanel extends PluginPanel
 	/**
 	 * One TopFastFlipRow (v0.8.7 design): a bordered card — #rank chip + icon +
 	 * name + action chip, then buy → sell with the expected profit highlighted
-	 * right, then ROI + risk chip + confidence. The #1 row (v0.8.10) carries a
-	 * gold-tinted border and the "GE suggestion" chip — the single primary item
-	 * to search manually in the GE. Display only — figures come verbatim from
-	 * the backend, and no Copy buttons remain (removed in v0.8.10: the game
-	 * accepts no paste).
+	 * right, then ROI + risk chip + confidence. The SELECTED row (v0.8.18)
+	 * carries a gold-tinted border and the "GE selected" chip; every other
+	 * visible row carries a "Use in GE" button — the explicit click that makes
+	 * it the selection. Figures come verbatim from the backend, and no Copy
+	 * buttons remain (removed in v0.8.10: the game accepts no paste).
 	 */
 	private JPanel fastFlipEntry(
 		RuneFlipData.FastFlipItem flip,
 		int rank,
-		boolean primary)
+		boolean selected)
 	{
 		JPanel entry = new JPanel();
 		entry.setLayout(new BoxLayout(entry, BoxLayout.Y_AXIS));
 		entry.setBackground(CARD_BG);
-		// The primary row is the focus: same gold-tinted border treatment as
+		// The selected row is the focus: same gold-tinted border treatment as
 		// the selected-item card; the rest keep the neutral card border.
 		entry.setBorder(BorderFactory.createCompoundBorder(
-			BorderFactory.createLineBorder(primary
+			BorderFactory.createLineBorder(selected
 				? new Color(0x4f, 0x44, 0x2f) : CARD_BORDER),
 			BorderFactory.createEmptyBorder(5, 7, 5, 7)));
 		entry.setAlignmentX(LEFT_ALIGNMENT);
@@ -1605,27 +1778,38 @@ public class RuneFlipPanel extends PluginPanel
 		entry.add(head);
 		entry.add(Box.createVerticalStrut(3));
 
-		// Primary GE suggestion chip (v0.8.10) — DISPLAY ONLY. The chip marks
-		// the one item to search; it is not a button and the panel writes
-		// nothing into the game. The in-game "RuneFlip: select …" option
-		// (v0.8.11, GeFieldAssistService) is where a click may prepare it.
-		if (primary)
+		// Selection row (v0.8.18). The selected row shows the display-only
+		// "GE selected" chip; every other row shows the "Use in GE" button —
+		// a plain JButton (ActionListener, never a low-level input API) whose
+		// click only records the selection and hands it to the plugin. The
+		// actual prepare stays behind the click-time gate in the services.
+		JPanel suggestionRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+		suggestionRow.setOpaque(false);
+		suggestionRow.setAlignmentX(LEFT_ALIGNMENT);
+		if (selected)
 		{
-			JPanel suggestionRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
-			suggestionRow.setOpaque(false);
-			suggestionRow.setAlignmentX(LEFT_ALIGNMENT);
-			JLabel suggestionChip = chip(GE_SUGGESTION_CHIP, GOLD, CHIP_GOLD_BG);
+			JLabel suggestionChip = chip(GE_SELECTED_CHIP, GOLD, CHIP_GOLD_BG);
 			suggestionChip.setToolTipText(
-				"<html>RuneFlip's primary suggestion — search this item in the "
-					+ "GE.<br>Tip: right-click while the GE search is open for "
-					+ "“RuneFlip: select …” (prepares the text "
-					+ "only).<br>RuneFlip never submits or confirms anything "
-					+ "for you.</html>");
+				"<html>The selected GE suggestion — click the in-game "
+					+ "“RuneFlip item: …” row while the GE search is open to "
+					+ "prepare it (loads the item only).<br>RuneFlip never "
+					+ "submits or confirms anything for you.</html>");
 			suggestionRow.add(suggestionChip);
-			suggestionRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 18));
-			entry.add(suggestionRow);
-			entry.add(Box.createVerticalStrut(3));
 		}
+		else
+		{
+			JButton useButton = actionButton(USE_IN_GE_LABEL,
+				() -> onSuggestionRowClicked(flip));
+			useButton.setToolTipText(
+				"<html>Make this the selected GE suggestion.<br>With the GE "
+					+ "search open, your click prepares the item into the "
+					+ "search (loads the item only).<br>RuneFlip never submits "
+					+ "or confirms anything for you.</html>");
+			suggestionRow.add(useButton);
+		}
+		suggestionRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 22));
+		entry.add(suggestionRow);
+		entry.add(Box.createVerticalStrut(3));
 
 		// Row 2: buy → sell left, expected whole-flip profit highlighted right.
 		JPanel legs = new JPanel(new BorderLayout(6, 0));

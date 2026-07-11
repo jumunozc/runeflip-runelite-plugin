@@ -34,11 +34,17 @@ or session data; never receives commands from the backend.
   trade actions, no overlays, and nothing that clicks, types or guides input
   in the game client. (The old Copy price / Copy qty buttons were removed in
   v0.8.10: the game accepts no paste, so they assisted nothing.)
-- **Primary GE suggestion (v0.8.10, display-only chip).** The **#1** item of
-  the Fast Flip list is always marked as the single primary suggestion for
-  your next GE search — a gold border plus a compact **"GE suggestion"**
-  chip, Flipping-Copilot style. #2/#3 stay informational and cannot be
-  selected as the suggestion.
+- **Selectable, paginated GE suggestions (v0.8.18; supersedes the fixed #1
+  of v0.8.10).** The Fast Flip card shows suggestions in **pages of 3**
+  ("Suggestions 1–3 / 4–6 / …", compact ◀ ▶ controls, up to 12 items: the
+  Top ranking first, then the fast-buy/fast-sell candidates de-duplicated).
+  Every visible row has a **"Use in GE"** button; **your click** makes that
+  row the **selected GE suggestion** (gold border + **"GE selected"**
+  chip). With the GE search open, the same click also prepares the item
+  into the search through the click-time-gated assist below; otherwise the
+  selection is kept and the card says *"Open GE search to use this item."*
+  Without a click the default is the first row of the current page. Paging
+  and selecting never set price/quantity and never confirm anything.
 - **Explicit GE Field Assist (v0.8.11, click-gated; visible since
   v0.8.13; functional search row since v0.8.17).** Official rule:
   **RuneFlip can prepare GE fields after explicit user action, but must
@@ -50,7 +56,8 @@ or session data; never receives commands from the backend.
     the moment you type so it never covers real results). Clicking it
     **selects** that item into the offer setup — the same thing clicking a
     native search result does, via the game's own previous-search select
-    script. Always the **#1 primary suggestion only** (#2/#3 never), only
+    script. Always the **selected GE suggestion only** (your panel pick, or
+    the default first row of the current page — never any other item), only
     while the search is really open, only on **your click** — and it never
     sets price/quantity and never confirms;
   - **top-left value hints** — `Press [<key>] to set RuneFlip price:
@@ -61,8 +68,8 @@ or session data; never receives commands from the backend.
     shown on the real GE prompts — an unknown editor shows nothing;
   - the **assist hotkey** (default **Right Brace `]`**, rebindable in the
     config if it conflicts): press it while a value editor is open and the
-    hinted value is prepared (on the search it only pre-types the #1
-    item's name — the row click is the select path);
+    hinted value is prepared (on the search it only pre-types the selected
+    suggestion's name — the row click is the select path);
   - the right-click `RuneFlip: select / set qty / set price` options.
 
   The value paths prepare the pending typed value — exactly as if you had
@@ -77,8 +84,9 @@ or session data; never receives commands from the backend.
   targets, a **Wiki vs RuneFlip targets** comparison (buy anchored to the wiki
   low leg, sell to the wiki high leg — e.g. *"Target is 3 gp above Wiki low for
   faster fill"*), the recommended action, and a compact Qty / Cost / Profit /
-  ROI / Time plan. With no item open, it shows the **Top 3 Fast Flips** (rank,
-  item, buy→sell, expected profit, ROI, risk, action). The panel is **focused**:
+  ROI / Time plan. With no item open, it shows the **paginated Fast Flip
+  suggestions** (rank, item, buy→sell, expected profit, ROI, risk, action —
+  3 per page, see the selectable-suggestions bullet). The panel is **focused**:
   it shows one view at a time and hides the legacy recommendation dashboard and
   the GE-completed summary (turn the *Context-aware GE panel* setting off to keep
   the full legacy panel). Which item is open is learned by a **read-only** poll
@@ -193,7 +201,7 @@ automation, menu invocation, server-var writes and OCR APIs
 service; and inside it the only script ever referenced must be the
 input-redraw one (`CHAT_TEXT_INPUT_REBUILD`). Every prepare requires the
 `USER_CLICK` action source (automatic/background execution is rejected) and
-a verified open editor, offers only the #1 primary suggestion (item) or the
+a verified open editor, offers only the selected GE suggestion (item) or the
 item you actually have open (qty/price), and never confirms, submits,
 cancels, aborts or collects.
 
@@ -219,7 +227,7 @@ yourself**:
 
 1. Build the jar (see **Build** above): `./gradlew clean test build` produces
    `build/libs/runeflip-companion-<version>.jar` (currently
-   `runeflip-companion-0.8.14.jar`).
+   `runeflip-companion-0.8.18.jar`).
 2. Copy that jar into RuneLite's sideloaded-plugins folder:
    - Windows: `%USERPROFILE%\.runelite\sideloaded-plugins\`
    - macOS / Linux: `~/.runelite/sideloaded-plugins/`
@@ -231,6 +239,23 @@ install only a jar you built (or trust). The default **Backend URL**
 (`https://runeflip-api.onrender.com/api`) points at the public RuneFlip
 service; point it at your own backend if you self-host.
 
+> **v0.8.18** (2026-07): selectable Top suggestions + paginated GE assist.
+> The Fast Flip card now pages the extended suggestion list in threes
+> ("Suggestions 1–3 / 4–6 / …", ◀ ▶ controls, up to 12 items — Top ranking
+> first, fast-buy/-sell fill, de-duplicated; overview fetch uses
+> `limit=12`). Every visible row is selectable via its **"Use in GE"**
+> button — your click makes it the **selected GE suggestion** ("GE
+> selected" chip) and, with the GE search open, prepares it through the
+> same click-time gate as the in-game row; with it closed, the card says
+> *"Open GE search to use this item."* The in-game `RuneFlip item: …` row,
+> the right-click select option and the hotkey pre-type now follow the
+> selection instead of always the #1. Price/qty assist unchanged: values
+> only ever for the item you actually have open. New `SuggestionPager` +
+> `SelectableGeSuggestionTest` (replaces `PrimaryGeSuggestionTest`);
+> ComplianceScanTest still pins one select call site (script 754) and every
+> confirm/cancel/collect API stays forbidden. `gradlew clean test build`
+> green.
+>
 > **v0.8.14** (2026-07): selected-item stability hotfix. Selecting a GE item
 > no longer flashes the loading card and falls back to the Top 3. Fixes:
 > (1) against a pre-v0.8.12 backend (which rejects the new `side` query

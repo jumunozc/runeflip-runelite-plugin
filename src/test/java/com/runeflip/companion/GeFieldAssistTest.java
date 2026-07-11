@@ -135,12 +135,13 @@ public class GeFieldAssistTest
 			GeFieldAssist.classifyEditor(false, false, null));
 	}
 
-	// ── clickable search row: the select gate (v0.8.17) ──────────────────────
+	// ── search select gate (v0.8.17, selectable rows v0.8.18) ───────────────
 
 	@Test
 	public void searchSelectRequiresAUserClickOnly()
 	{
-		// The full gate: user's own click + open search + valid #1 match.
+		// The full gate: user's own click + open search + id == the selected
+		// GE suggestion.
 		assertTrue(GeFieldAssist.canSelectSearchItem(
 			GeFieldAssist.ActionSource.USER_CLICK, true, 560, 560));
 		// Even the hotkey is rejected — it keeps prepare-text semantics;
@@ -162,10 +163,10 @@ public class GeFieldAssistTest
 	}
 
 	@Test
-	public void searchSelectAcceptsOnlyTheNumberOnePrimary()
+	public void searchSelectAcceptsOnlyTheSelectedSuggestion()
 	{
-		// Any item other than the #1 primary — #2/#3 of the Top 3 included —
-		// can never activate the search assist.
+		// Any item other than the SELECTED suggestion — another visible row,
+		// a hidden page, anything unloaded — can never activate the assist.
 		assertFalse(GeFieldAssist.canSelectSearchItem(
 			GeFieldAssist.ActionSource.USER_CLICK, true, 4151, 560));
 		// Invalid item ids never select.
@@ -173,6 +174,20 @@ public class GeFieldAssistTest
 			GeFieldAssist.ActionSource.USER_CLICK, true, 0, 0));
 		assertFalse(GeFieldAssist.canSelectSearchItem(
 			GeFieldAssist.ActionSource.USER_CLICK, true, -1, -1));
+	}
+
+	@Test
+	public void anyVisibleRowSelectsOnceTheUserPickedIt()
+	{
+		// v0.8.18: the user clicked the #2/#3 row in the panel — that row IS
+		// now the selected suggestion, so its click-time gate passes like the
+		// old #1 did. The gate still compares ids strictly; only the item the
+		// user explicitly picked can ever match.
+		assertTrue(GeFieldAssist.canSelectSearchItem(
+			GeFieldAssist.ActionSource.USER_CLICK, true, 4151, 4151));
+		// …and only with the search actually open.
+		assertFalse(GeFieldAssist.canSelectSearchItem(
+			GeFieldAssist.ActionSource.USER_CLICK, false, 4151, 4151));
 	}
 
 	// ── visible hint model (v0.8.14) ─────────────────────────────────────────

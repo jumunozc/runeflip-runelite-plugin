@@ -147,6 +147,31 @@ public class ProdOverviewContractTest
 	}
 
 	@Test
+	public void extendedSelectionPaginatesTopPlusGeneralWithoutDuplicates()
+		throws IOException
+	{
+		// v0.8.18: the paginated suggestion list — the Top ranking leads,
+		// the fast-buy/-sell candidates fill the later pages, deduplicated.
+		RuneFlipData.FastFlipOverviewResponse overview = load();
+		FastFlipSelection selection = FastFlipSelection.selectExtended(
+			overview, RuneFlipPanel.MAX_FAST_FLIP_ITEMS);
+
+		assertEquals(FastFlipSelection.Source.TOP, selection.source);
+		assertTrue("extended list keeps at least the Top rows",
+			selection.rows.size() >= overview.topFlips.size());
+		assertTrue(selection.rows.size() <= RuneFlipPanel.MAX_FAST_FLIP_ITEMS);
+		assertEquals("the Top ranking still leads the list",
+			overview.topFlips.get(0).itemId, selection.rows.get(0).itemId);
+
+		List<Integer> ids = new ArrayList<>();
+		for (RuneFlipData.FastFlipItem row : selection.rows)
+		{
+			assertTrue("duplicate item " + row.itemId, !ids.contains(row.itemId));
+			ids.add(row.itemId);
+		}
+	}
+
+	@Test
 	public void generalFallbackDeduplicatesTheOverlappingSections() throws IOException
 	{
 		// Production fastBuy and fastSell list the SAME liquid items — the

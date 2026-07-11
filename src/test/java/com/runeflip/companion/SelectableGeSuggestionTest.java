@@ -11,55 +11,48 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 /**
- * Primary GE suggestion (v0.8.10). The FIRST row of the rendered Fast Flip
- * selection — and only it — is RuneFlip's primary suggestion for the user's
- * next manual GE search (Flipping-Copilot style). The chip itself stays
- * display-only; since v0.8.11 the #1 may additionally be PREPARED into the
- * GE search, but only via the click-gated "RuneFlip: select …" option in
- * GeFieldAssistService — never from the panel. The v0.8.10 patch also
- * removed the v0.8.3 Copy price/qty buttons everywhere: the game accepts no
- * paste, so they assisted nothing.
+ * Selectable GE suggestions (v0.8.18, replaces the v0.8.10 fixed-#1 rule).
+ * Every VISIBLE Fast Flip row is selectable by the user's own click on its
+ * "Use in GE" button; the selected row carries the "GE selected" chip and is
+ * the ONE suggestion the (click-time gated) GE assist may prepare. The
+ * behavioral rules live in {@link SuggestionPagerTest} and
+ * {@link GeFieldAssistTest}; this test pins the panel copy and the
+ * source-level guarantees the compliance story relies on.
  */
-public class PrimaryGeSuggestionTest
+public class SelectableGeSuggestionTest
 {
 	@Test
-	public void firstTopRowIsThePrimarySuggestion()
+	public void chipAndButtonCopyAreCompact()
 	{
-		assertTrue(RuneFlipPanel.isPrimaryGeSuggestion(
-			FastFlipSelection.Source.TOP, 1));
+		assertEquals("GE selected", RuneFlipPanel.GE_SELECTED_CHIP);
+		assertEquals("Use in GE", RuneFlipPanel.USE_IN_GE_LABEL);
 	}
 
 	@Test
-	public void secondAndThirdRowsAreNeverPrimary()
+	public void closedSearchHintTellsTheUserToOpenItManually()
 	{
-		assertFalse(RuneFlipPanel.isPrimaryGeSuggestion(
-			FastFlipSelection.Source.TOP, 2));
-		assertFalse(RuneFlipPanel.isPrimaryGeSuggestion(
-			FastFlipSelection.Source.TOP, 3));
-		assertFalse(RuneFlipPanel.isPrimaryGeSuggestion(
-			FastFlipSelection.Source.GENERAL, 2));
+		// A row click with the GE search closed prepares NOTHING — the
+		// selection is kept and the user is told to open the search manually.
+		assertEquals("Open GE search to use this item.",
+			RuneFlipPanel.OPEN_GE_SEARCH_HINT);
 	}
 
+	/**
+	 * The suggestion rows must be selectable through plain JButtons only —
+	 * never a MouseListener/MouseEvent (globally forbidden and scanned by
+	 * {@link ComplianceScanTest}); this pins that the panel actually wires
+	 * the button label to the click handler.
+	 */
 	@Test
-	public void generalIdeasFallbackStillMarksItsFirstRow()
+	public void rowSelectionGoesThroughThePlainButtonHelper() throws IOException
 	{
-		// When the strategy matched nothing and the liquid "General ideas"
-		// render instead, the user still gets exactly one search suggestion.
-		assertTrue(RuneFlipPanel.isPrimaryGeSuggestion(
-			FastFlipSelection.Source.GENERAL, 1));
-	}
-
-	@Test
-	public void emptyAndOfflineStatesHaveNoSuggestion()
-	{
-		assertFalse(RuneFlipPanel.isPrimaryGeSuggestion(
-			FastFlipSelection.Source.NONE, 1));
-	}
-
-	@Test
-	public void chipCopyIsCompact()
-	{
-		assertEquals("GE suggestion", RuneFlipPanel.GE_SUGGESTION_CHIP);
+		String panel = ComplianceScanTest.stripComments(read("RuneFlipPanel.java"));
+		assertTrue("the Use in GE button must exist",
+			panel.contains("USE_IN_GE_LABEL"));
+		assertTrue("the row click must land in the selection handler",
+			panel.contains("onSuggestionRowClicked"));
+		assertFalse("no MouseListener may ever appear in the panel",
+			panel.contains("MouseListener"));
 	}
 
 	// ── Copy price/qty removal (v0.8.10) — source-level guarantees ──────────

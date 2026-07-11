@@ -111,6 +111,68 @@ public class FastFlipSelectionTest
 		assertEquals(3, selection.rows.get(2).itemId);
 	}
 
+	// ── Extended selection (v0.8.18): the paginated suggestion list ─────────
+
+	@Test
+	public void extendedSelectionConcatenatesTopThenGeneralDeduplicated()
+	{
+		RuneFlipData.FastFlipOverviewResponse response = overview(
+			Arrays.asList(item(11), item(20)), // item 11 duplicates a Top row
+			Arrays.asList(item(21)),
+			Arrays.asList(item(10), item(11), item(12)));
+
+		FastFlipSelection selection = FastFlipSelection.selectExtended(response, 12);
+
+		// The Top ranking leads (and names the source); the fast-buy/-sell
+		// candidates fill the later pages, de-duplicated by itemId.
+		assertEquals(FastFlipSelection.Source.TOP, selection.source);
+		assertEquals(Arrays.asList(10, 11, 12, 20, 21),
+			Arrays.asList(
+				selection.rows.get(0).itemId,
+				selection.rows.get(1).itemId,
+				selection.rows.get(2).itemId,
+				selection.rows.get(3).itemId,
+				selection.rows.get(4).itemId));
+	}
+
+	@Test
+	public void extendedSelectionIsCappedAtMax()
+	{
+		RuneFlipData.FastFlipOverviewResponse response = overview(
+			Arrays.asList(item(1), item(2), item(3)),
+			Arrays.asList(item(4), item(5), item(6)),
+			Arrays.asList(item(10), item(11), item(12)));
+
+		assertEquals(4, FastFlipSelection.selectExtended(response, 4).rows.size());
+	}
+
+	@Test
+	public void extendedSelectionWithoutTopIsGeneral()
+	{
+		RuneFlipData.FastFlipOverviewResponse response = overview(
+			Arrays.asList(item(1), item(2)),
+			Arrays.asList(item(2), item(3)),
+			new ArrayList<>());
+
+		FastFlipSelection selection = FastFlipSelection.selectExtended(response, 12);
+
+		assertEquals(FastFlipSelection.Source.GENERAL, selection.source);
+		assertEquals(3, selection.rows.size());
+	}
+
+	@Test
+	public void extendedSelectionHandlesEmptyAndNullLikeSelect()
+	{
+		assertEquals(FastFlipSelection.Source.NONE,
+			FastFlipSelection.selectExtended(null, 12).source);
+		assertEquals(FastFlipSelection.Source.NONE,
+			FastFlipSelection.selectExtended(
+				overview(new ArrayList<>(), null, null), 12).source);
+		assertEquals(FastFlipSelection.Source.NONE,
+			FastFlipSelection.selectExtended(
+				overview(Arrays.asList(item(1)), null, null), 0).source);
+	}
+
 	// (b) Nothing matches anywhere => NONE, no rows (the panel then shows the
 	// strategy + relax hints instead of a blank box).
 	@Test

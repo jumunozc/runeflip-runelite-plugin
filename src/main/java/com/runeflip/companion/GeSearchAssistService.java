@@ -35,8 +35,10 @@ import org.slf4j.LoggerFactory;
  *       prepare-search-text semantics; {@code AUTOMATIC} (timers, events,
  *       background code) is rejected as everywhere else.</li>
  *   <li><b>GE search open, verified.</b> Wrong state = no-op.</li>
- *   <li><b>#1 primary suggestion only.</b> The clicked item id must equal
- *       the #1 primary's id; #2/#3 of the Top 3 can never activate the
+ *   <li><b>Selected GE suggestion only (v0.8.18).</b> The clicked item id
+ *       must equal the selected suggestion's id — the row the user
+ *       explicitly picked in the side panel (or the default first row of
+ *       its current page). No other item, visible or not, can activate the
  *       search assist.</li>
  * </ul>
  *
@@ -70,19 +72,19 @@ class GeSearchAssistService
 	}
 
 	/**
-	 * Selects the #1 primary suggestion into the open GE search — the
-	 * user's own click on the "RuneFlip item: …" row, re-validated at
-	 * click time. Anything short of the full gate (USER_CLICK + search
-	 * open + valid id + id == #1 primary) is a no-op. Never sets
-	 * price/quantity, never confirms.
+	 * Selects the SELECTED GE suggestion into the open GE search — the
+	 * user's own click on the "RuneFlip item: …" row or on a visible panel
+	 * row, re-validated at click time. Anything short of the full gate
+	 * (USER_CLICK + search open + valid id + id == selected suggestion) is
+	 * a no-op. Never sets price/quantity, never confirms.
 	 */
-	boolean selectPrimaryItem(
-		RuneFlipData.FastFlipItem primary,
+	boolean selectSuggestedItem(
+		RuneFlipData.FastFlipItem selected,
 		int itemId,
 		GeFieldAssist.ActionSource source)
 	{
-		if (primary == null || !GeFieldAssist.canSelectSearchItem(
-			source, fieldAssist.isItemSearchOpen(), itemId, primary.itemId))
+		if (selected == null || !GeFieldAssist.canSelectSearchItem(
+			source, fieldAssist.isItemSearchOpen(), itemId, selected.itemId))
 		{
 			return false;
 		}

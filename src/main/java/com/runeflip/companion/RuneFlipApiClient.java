@@ -73,7 +73,9 @@ public class RuneFlipApiClient
 		Runnable onFailure)
 	{
 		String query = strategyQuery == null ? "" : strategyQuery;
-		get(backendUrl, "/fast-flip/overview?limit=3" + query, clientId,
+		// limit=12 (v0.8.18): fills the paginated suggestion list (4 pages of
+		// 3). Older backends that cap lower simply yield fewer pages.
+		get(backendUrl, "/fast-flip/overview?limit=12" + query, clientId,
 			RuneFlipData.FastFlipOverviewResponse.class, onSuccess, onFailure);
 	}
 
