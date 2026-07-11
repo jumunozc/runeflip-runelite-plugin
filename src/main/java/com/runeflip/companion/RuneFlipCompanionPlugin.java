@@ -250,7 +250,8 @@ public class RuneFlipCompanionPlugin extends Plugin
 		{
 			panel = new RuneFlipPanel(
 				itemManager, this::refreshPanel, pairingActions(),
-				designActions(), geSuggestionActions(), isPaired());
+				designActions(), geSuggestionActions(),
+				this::onTopFlipsRefresh, isPaired());
 			navButton = NavigationButton.builder()
 				.tooltip("RuneFlip")
 				.icon(buildNavIcon())
@@ -1360,21 +1361,45 @@ public class RuneFlipCompanionPlugin extends Plugin
 		String clientId,
 		RuneFlipPanel target)
 	{
+		loadFastFlip(url, strategyQuery, clientId, target, false);
+	}
+
+	private void loadFastFlip(
+		String url,
+		String strategyQuery,
+		String clientId,
+		RuneFlipPanel target,
+		boolean bypassCache)
+	{
 		// Fresh cache (v0.8.10): pill toggles within the TTL re-render at once
 		// — no fetch, no flicker. The regular refresh cycle repopulates it.
-		RuneFlipData.FastFlipOverviewResponse cached =
-			overviewCache.get(strategyQuery, System.currentTimeMillis());
-		if (cached != null)
+		// Hotfix v0.8.20: the user's explicit ↻ Refresh click BYPASSES the
+		// read (bypassCache) — serving the ≤20s-old cached overview made the
+		// button look dead. The fresh response still repopulates the cache.
+		if (!bypassCache)
 		{
-			rememberSuggestions(cached);
-			SwingUtilities.invokeLater(
-				() -> target.updateFastFlip(cached));
-			return;
+			RuneFlipData.FastFlipOverviewResponse cached =
+				overviewCache.get(strategyQuery, System.currentTimeMillis());
+			if (cached != null)
+			{
+				rememberSuggestions(cached);
+				SwingUtilities.invokeLater(
+					() -> target.updateFastFlip(cached));
+				return;
+			}
 		}
 
 		// Stale-response guard (v0.8.10): rapid Low→Med→High clicks issue new
 		// tickets; only the newest request's answer ever renders.
 		long ticket = overviewSeq.begin();
+		if (bypassCache && log.isDebugEnabled())
+		{
+			// Safe diagnostic: strategy + ticket only — never token/client id.
+			log.debug("Top Fast Flips fresh fetch: strategy={} requestSeq={}",
+				strategyQuery == null || strategyQuery.isEmpty()
+					? "default" : strategyQuery,
+				ticket);
+		}
 		apiClient.fetchFastFlipOverview(url, strategyQuery, clientId,
 			response ->
 			{
@@ -1476,6 +1501,46 @@ public class RuneFlipCompanionPlugin extends Plugin
 		String clientId = ensureClientId();
 		withBaseQuery(url, clientId, base ->
 			loadFastFlip(url, overriddenQuery(base), clientId, target));
+	}
+
+	/**
+	 * The user's click on the Top Fast Flips ↻ Refresh (hotfix v0.8.20):
+	 * force a FRESH overview fetch — same strategy, cache bypassed — so the
+	 * click always produces a visible round-trip. Display only: the panel
+	 * keeps its old rows until the response renders, page/selection survive
+	 * via the normal retention rules, and the selected-item card is never
+	 * touched (this path only re-renders the Fast Flip card). {@code page}
+	 * is the panel's current suggestion page, used for the debug line only.
+	 */
+	private void onTopFlipsRefresh(int page)
+	{
+		RuneFlipPanel target = panel;
+		if (target == null)
+		{
+			return;
+		}
+		String url = config.backendUrl();
+		String clientId = ensureClientId();
+		withBaseQuery(url, clientId, base ->
+		{
+			String query = overriddenQuery(base);
+			if (log.isDebugEnabled())
+			{
+				// Safe diagnostic: strategy/page/selected item + cache state
+				// — never a token, never the client id.
+				RuneFlipData.FastFlipItem selected = selectedSuggestion;
+				boolean cacheFresh = overviewCache.get(
+					query, System.currentTimeMillis()) != null;
+				log.debug(
+					"Top Fast Flips refresh clicked: strategy={} page={} "
+						+ "selected={} cache={}",
+					query == null || query.isEmpty() ? "default" : query,
+					page,
+					selected == null ? "none" : selected.itemId,
+					cacheFresh ? "hit-bypassed" : "miss");
+			}
+			loadFastFlip(url, query, clientId, target, true);
+		});
 	}
 
 	/**

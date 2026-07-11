@@ -237,7 +237,7 @@ yourself**:
 
 1. Build the jar (see **Build** above): `./gradlew clean test build` produces
    `build/libs/runeflip-companion-<version>.jar` (currently
-   `runeflip-companion-0.8.19.jar`).
+   `runeflip-companion-0.8.20.jar`).
 2. Copy that jar into RuneLite's sideloaded-plugins folder:
    - Windows: `%USERPROFILE%\.runelite\sideloaded-plugins\`
    - macOS / Linux: `~/.runelite/sideloaded-plugins/`
@@ -249,6 +249,16 @@ install only a jar you built (or trust). The default **Backend URL**
 (`https://runeflip-api.onrender.com/api`) points at the public RuneFlip
 service; point it at your own backend if you self-host.
 
+> **v0.8.20** (2026-07): Top Fast Flips ↻ Refresh hotfix. The section's
+> Refresh looked dead: it fired the full panel refresh, whose 20s response
+> cache served the previous overview right back. The link now runs a
+> Fast-Flip-only FRESH fetch (cache read bypassed, same strategy), shows
+> "Updating…" + a disabled button while in flight, never clears the list,
+> and the v0.8.18 retention rules keep page (clamped) and selected
+> suggestion (kept while listed, else visible default) sane. The
+> selected-item card is never touched. New `TopFlipsRefreshTest`;
+> `gradlew clean test build` green.
+>
 > **v0.8.19** (2026-07): SELL-slot hover PROFIT line. Hovering an active
 > SELL slot shows `PROFIT: +50K gp` / `PROFIT: -2K gp` / `PROFIT:
 > unknown` as one display-only tooltip line (RuneLite TooltipManager).

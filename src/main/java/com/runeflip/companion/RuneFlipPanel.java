@@ -64,6 +64,15 @@ public class RuneFlipPanel extends PluginPanel
 	private final PairingActions pairingActions;
 	private final DesignActions designActions;
 	private final GeSuggestionActions geSuggestionActions;
+	/** Fast-Flip-only FRESH refresh (hotfix v0.8.20): the section's ↻ Refresh
+	 *  must visibly re-fetch, bypassing the short response cache — the full
+	 *  header refresh kept serving the ≤20s-old cached overview, so the click
+	 *  looked dead. Receives the current suggestion page (for the plugin's
+	 *  safe debug line only). */
+	private final java.util.function.IntConsumer onFastFlipRefresh;
+	/** The section's ↻ Refresh button — disabled while a fresh fetch is in
+	 *  flight ("Updating…" shows next to it); re-enabled on the response. */
+	private JButton fastFlipRefreshButton;
 
 	// ── Selectable, paginated suggestions (v0.8.18) ─────────────────────────
 	/** Extended suggestion list of the LAST rendered response (up to
@@ -225,7 +234,7 @@ public class RuneFlipPanel extends PluginPanel
 	private static final int MAX_NAME_CHARS = 40;
 	/** Shown in the header next to the wordmark (v0.8.7 design). Must match
 	 *  build.gradle's version — pinned by RuneFlipPanelTextTest. */
-	static final String PLUGIN_VERSION = "0.8.19";
+	static final String PLUGIN_VERSION = "0.8.20";
 
 	/**
 	 * Pairing callbacks implemented by the plugin (v0.6.3). Both are
@@ -277,6 +286,7 @@ public class RuneFlipPanel extends PluginPanel
 		PairingActions pairingActions,
 		DesignActions designActions,
 		GeSuggestionActions geSuggestionActions,
+		java.util.function.IntConsumer onFastFlipRefresh,
 		boolean initiallyPaired)
 	{
 		this.itemManager = itemManager;
@@ -284,6 +294,7 @@ public class RuneFlipPanel extends PluginPanel
 		this.pairingActions = pairingActions;
 		this.designActions = designActions;
 		this.geSuggestionActions = geSuggestionActions;
+		this.onFastFlipRefresh = onFastFlipRefresh;
 		this.pairButton = smallButton("Pair");
 		this.unpairButton = smallButton("Unpair");
 
@@ -438,8 +449,12 @@ public class RuneFlipPanel extends PluginPanel
 		updatingLabel.setForeground(GOLD);
 		updatingLabel.setVisible(false);
 		headerRowRight.add(updatingLabel);
-		JButton refreshLink = linkButton("↻ Refresh", GOLD, onRefresh);
-		headerRowRight.add(refreshLink);
+		// Hotfix v0.8.20: this link now triggers the Fast-Flip-only FRESH
+		// refresh (cache bypassed) instead of the full header refresh, whose
+		// short response cache made the click look dead for up to 20s.
+		fastFlipRefreshButton = linkButton(
+			"↻ Refresh", GOLD, this::onFastFlipRefreshClicked);
+		headerRowRight.add(fastFlipRefreshButton);
 		fastFlipHeaderRow.add(headerRowRight, BorderLayout.EAST);
 		fastFlipHeaderRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 20));
 		fastFlipHeaderRow.setAlignmentX(LEFT_ALIGNMENT);
@@ -1316,6 +1331,27 @@ public class RuneFlipPanel extends PluginPanel
 	 * after the saved strategy matched nothing — the card then says so instead of
 	 * silently presenting default results as the saved-strategy ones.
 	 */
+	/**
+	 * The section's ↻ Refresh click (hotfix v0.8.20): show "Updating…" and
+	 * disable the button until the response renders, then hand off to the
+	 * plugin's FRESH fetch (cache bypassed, same strategy). Display state is
+	 * NOT touched here — the old rows stay on screen until the fresh
+	 * response arrives, and page/selection survive via the normal
+	 * updateFastFlip retention rules.
+	 */
+	private void onFastFlipRefreshClicked()
+	{
+		updatingLabel.setVisible(true);
+		if (fastFlipRefreshButton != null)
+		{
+			fastFlipRefreshButton.setEnabled(false);
+		}
+		if (onFastFlipRefresh != null)
+		{
+			onFastFlipRefresh.accept(fastFlipPage);
+		}
+	}
+
 	void updateFastFlip(
 		RuneFlipData.FastFlipOverviewResponse response,
 		boolean defaultFallback)
@@ -1329,6 +1365,10 @@ public class RuneFlipPanel extends PluginPanel
 		// A rendered response ends the in-flight indicator (v0.8.10); stale
 		// responses never reach here (the plugin drops them by sequence).
 		updatingLabel.setVisible(false);
+		if (fastFlipRefreshButton != null)
+		{
+			fastFlipRefreshButton.setEnabled(true);
+		}
 
 		// StrategyPill highlight (v0.8.7): mirror the strategy the backend says
 		// it APPLIED to this response — never a client-side guess (the optimistic
