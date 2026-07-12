@@ -123,6 +123,16 @@ public class RuneFlipPanel extends PluginPanel
 	private final JPanel pairingInputRow = new JPanel(new BorderLayout(6, 0));
 	private final JLabel pairingHint = new JLabel();
 
+	/** Account pairing (v0.9.1): status + user code + contextual buttons. */
+	private final JLabel accountStatus = new JLabel("Not connected");
+	private final JLabel accountCode = new JLabel(" ");
+	private final JButton accountPrimaryButton;
+	private final JButton accountOpenButton;
+	private final JLabel accountHint = new JLabel();
+	private AccountActions accountActions;
+	private AccountPairingService.State accountState =
+		AccountPairingService.State.NOT_CONNECTED;
+
 	/** Context-aware GE panel opt-in (v0.8.5), refreshed from config. When ON,
 	 *  the panel is focused: only the selected-item card OR the Top 3, never the
 	 *  legacy dashboard or GE completed. OFF keeps the full legacy panel. */
@@ -234,7 +244,7 @@ public class RuneFlipPanel extends PluginPanel
 	private static final int MAX_NAME_CHARS = 40;
 	/** Shown in the header next to the wordmark (v0.8.7 design). Must match
 	 *  build.gradle's version — pinned by RuneFlipPanelTextTest. */
-	static final String PLUGIN_VERSION = "0.8.20";
+	static final String PLUGIN_VERSION = "0.9.1";
 
 	/**
 	 * Pairing callbacks implemented by the plugin (v0.6.3). Both are
@@ -247,6 +257,24 @@ public class RuneFlipPanel extends PluginPanel
 		void pair(String code, java.util.function.Consumer<String> onResult);
 
 		void unpair(java.util.function.Consumer<String> onResult);
+	}
+
+	/**
+	 * Account pairing callbacks (v0.9.1), implemented by the plugin. All are
+	 * user-click only and touch nothing but HTTP + plugin config + the OS
+	 * browser (openPairingPage uses RuneLite's LinkBrowser). No credential
+	 * ever passes through the panel — it only renders state names and the
+	 * short user code the person must approve in their own logged-in web.
+	 */
+	interface AccountActions
+	{
+		void connect();
+
+		void cancel();
+
+		void disconnect();
+
+		void openPairingPage();
 	}
 
 	/**
@@ -297,6 +325,8 @@ public class RuneFlipPanel extends PluginPanel
 		this.onFastFlipRefresh = onFastFlipRefresh;
 		this.pairButton = smallButton("Pair");
 		this.unpairButton = smallButton("Unpair");
+		this.accountPrimaryButton = smallButton("Connect account");
+		this.accountOpenButton = smallButton("Open pairing page");
 
 		setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
 		setBackground(PANEL_BG);
@@ -374,6 +404,72 @@ public class RuneFlipPanel extends PluginPanel
 		add(Box.createVerticalStrut(8));
 		selectedHeader.setVisible(false);
 		selectedCard.setVisible(false);
+
+		// ── Account (v0.9.1 — device pairing; config + HTTP + browser only) ─
+		JPanel accountHeader = new JPanel(new BorderLayout());
+		accountHeader.setOpaque(false);
+		JLabel accountTitle = new JLabel("Account");
+		accountTitle.setFont(FontManager.getRunescapeSmallFont());
+		accountTitle.setForeground(MUTED);
+		accountHeader.add(accountTitle, BorderLayout.WEST);
+		accountStatus.setFont(FontManager.getRunescapeSmallFont());
+		accountStatus.setForeground(MUTED);
+		accountHeader.add(accountStatus, BorderLayout.EAST);
+		accountHeader.setMaximumSize(new Dimension(Integer.MAX_VALUE, 20));
+		accountHeader.setAlignmentX(LEFT_ALIGNMENT);
+		add(accountHeader);
+		add(Box.createVerticalStrut(4));
+
+		// The short human code, rendered large: the ONLY thing the user must
+		// compare against the approval page (anti-phishing anchor).
+		accountCode.setFont(FontManager.getRunescapeBoldFont());
+		accountCode.setForeground(GOLD);
+		add(wrap(accountCode));
+		add(Box.createVerticalStrut(4));
+
+		JPanel accountButtons = new JPanel(new BorderLayout(6, 0));
+		accountButtons.setOpaque(false);
+		accountButtons.add(accountPrimaryButton, BorderLayout.WEST);
+		accountButtons.add(accountOpenButton, BorderLayout.EAST);
+		accountButtons.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
+		accountButtons.setAlignmentX(LEFT_ALIGNMENT);
+		add(accountButtons);
+		add(Box.createVerticalStrut(4));
+
+		accountHint.setFont(FontManager.getRunescapeSmallFont());
+		accountHint.setForeground(MUTED);
+		add(wrap(accountHint));
+		add(Box.createVerticalStrut(8));
+
+		accountPrimaryButton.addActionListener(e ->
+		{
+			AccountActions actions = accountActions;
+			if (actions == null)
+			{
+				return;
+			}
+			switch (accountState)
+			{
+				case WAITING_APPROVAL:
+					actions.cancel();
+					break;
+				case CONNECTED:
+				case REVOKED:
+					actions.disconnect();
+					break;
+				default:
+					actions.connect();
+			}
+		});
+		accountOpenButton.addActionListener(e ->
+		{
+			AccountActions actions = accountActions;
+			if (actions != null)
+			{
+				actions.openPairingPage();
+			}
+		});
+		renderAccountState(AccountPairingService.State.NOT_CONNECTED, null, null);
 
 		// ── Pairing (v0.6.3 — config + HTTP only, never touches the game) ──
 		JPanel pairingHeader = new JPanel(new BorderLayout());
@@ -524,6 +620,102 @@ public class RuneFlipPanel extends PluginPanel
 	 * Paired = the plugin holds a pairing-issued token in its LOCAL config.
 	 * Display only; the token value never reaches the panel.
 	 */
+	/** Wires the account-pairing callbacks after construction (v0.9.1). */
+	void setAccountActions(AccountActions actions)
+	{
+		this.accountActions = actions;
+	}
+
+	/**
+	 * Renders the account section for a state (EDT only). The user code is
+	 * shown ONLY while waiting for approval; no secret ever reaches here.
+	 */
+	void setAccountState(
+		AccountPairingService.State state,
+		String userCode,
+		String error)
+	{
+		renderAccountState(state, userCode, error);
+		revalidate();
+		repaint();
+	}
+
+	private void renderAccountState(
+		AccountPairingService.State state,
+		String userCode,
+		String error)
+	{
+		accountState = state;
+		switch (state)
+		{
+			case WAITING_APPROVAL:
+				accountStatus.setText("Waiting for approval");
+				accountStatus.setForeground(GOLD);
+				accountCode.setText(userCode == null ? " " : userCode);
+				accountCode.setVisible(true);
+				accountPrimaryButton.setText("Cancel");
+				accountOpenButton.setVisible(true);
+				accountHint.setText(html(
+					"Approve this exact code in RuneFlip (web or mobile) while "
+						+ "logged in. Never approve a code someone sent you."));
+				break;
+			case CONNECTED:
+				accountStatus.setText("Connected");
+				accountStatus.setForeground(PROFIT);
+				accountCode.setText(" ");
+				accountCode.setVisible(false);
+				accountPrimaryButton.setText("Disconnect");
+				accountOpenButton.setVisible(false);
+				accountHint.setText(html(
+					"This RuneLite is linked to your RuneFlip account. Manage "
+						+ "devices from the web dashboard."));
+				break;
+			case EXPIRED:
+				accountStatus.setText("Code expired");
+				accountStatus.setForeground(MUTED);
+				accountCode.setText(" ");
+				accountCode.setVisible(false);
+				accountPrimaryButton.setText("Connect account");
+				accountOpenButton.setVisible(false);
+				accountHint.setText(html(
+					"The pairing code expired — connect again for a fresh one."));
+				break;
+			case DENIED:
+				accountStatus.setText("Denied");
+				accountStatus.setForeground(RED);
+				accountCode.setText(" ");
+				accountCode.setVisible(false);
+				accountPrimaryButton.setText("Connect account");
+				accountOpenButton.setVisible(false);
+				accountHint.setText(html(
+					"The request was denied from your account."));
+				break;
+			case REVOKED:
+				accountStatus.setText("Revoked");
+				accountStatus.setForeground(RED);
+				accountCode.setText(" ");
+				accountCode.setVisible(false);
+				accountPrimaryButton.setText("Disconnect");
+				accountOpenButton.setVisible(false);
+				accountHint.setText(html(
+					"Access was revoked from your account. Disconnect, then "
+						+ "connect again if this was you."));
+				break;
+			case NOT_CONNECTED:
+			default:
+				accountStatus.setText("Not connected");
+				accountStatus.setForeground(MUTED);
+				accountCode.setText(" ");
+				accountCode.setVisible(false);
+				accountPrimaryButton.setText("Connect account");
+				accountOpenButton.setVisible(false);
+				accountHint.setText(html(error != null
+					? error
+					: "Link this RuneLite to your RuneFlip account — no codes "
+						+ "to copy, you approve from the web."));
+		}
+	}
+
 	void setPaired(boolean paired)
 	{
 		pairingStatus.setText(paired ? "Paired" : "Not paired");

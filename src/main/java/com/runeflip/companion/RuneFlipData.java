@@ -347,4 +347,62 @@ public final class RuneFlipData
 		public String clientId;
 		public String token;
 	}
+
+	// ── Account device pairing (v0.9.1) ─────────────────────────────────────
+
+	/** Body of POST /pairing/start. */
+	public static class DevicePairingStartRequest
+	{
+		public final String deviceName;
+
+		public DevicePairingStartRequest(String deviceName)
+		{
+			this.deviceName = deviceName;
+		}
+	}
+
+	/**
+	 * Response of POST /pairing/start. deviceCode is the polling secret —
+	 * kept in memory only for the pairing attempt, never logged or shown.
+	 */
+	public static class DevicePairingStartResponse
+	{
+		public String deviceCode;
+		public String userCode;
+		public String verificationUri;
+		public String verificationUriComplete;
+		public String expiresAt;
+		public Integer pollIntervalSeconds;
+	}
+
+	/** Body of POST /pairing/token (the poll). */
+	public static class DevicePollRequest
+	{
+		public final String deviceCode;
+
+		public DevicePollRequest(String deviceCode)
+		{
+			this.deviceCode = deviceCode;
+		}
+	}
+
+	/**
+	 * Response of POST /pairing/token. `credential` appears ONLY on the
+	 * single successful 'approved' poll — stored as secret config, never
+	 * displayed, never logged.
+	 */
+	public static class DevicePollResponse
+	{
+		public String status;
+		public String credential;
+		public DevicePollDevice device;
+	}
+
+	public static class DevicePollDevice
+	{
+		public String id;
+		public String name;
+		public String platform;
+		public String clientId;
+	}
 }

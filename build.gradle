@@ -23,7 +23,7 @@ dependencies {
 }
 
 group = 'com.runeflip'
-version = '0.8.20'
+version = '0.9.1'
 
 java {
     sourceCompatibility = JavaVersion.VERSION_11

@@ -106,6 +106,9 @@ public class RuneFlipCompanionPlugin extends Plugin
 	@Inject
 	private ScheduledExecutorService executor;
 
+	/** Account pairing state machine (v0.9.1); rebuilt on every startUp. */
+	private AccountPairingService accountPairing;
+
 	@Inject
 	private RuneFlipCompanionConfig config;
 
@@ -246,12 +249,14 @@ public class RuneFlipCompanionPlugin extends Plugin
 		assistHotkey = new GeFieldAssistHotkey(
 			keyManager, () -> config.geFieldAssistHotkey(), this::onAssistHotkey);
 		assistHotkey.register();
+		accountPairing = buildAccountPairing();
 		if (config.panelEnabled())
 		{
 			panel = new RuneFlipPanel(
 				itemManager, this::refreshPanel, pairingActions(),
 				designActions(), geSuggestionActions(),
 				this::onTopFlipsRefresh, isPaired());
+			panel.setAccountActions(accountActions());
 			navButton = NavigationButton.builder()
 				.tooltip("RuneFlip")
 				.icon(buildNavIcon())
@@ -259,6 +264,11 @@ public class RuneFlipCompanionPlugin extends Plugin
 				.panel(panel)
 				.build();
 			clientToolbar.addNavigation(navButton);
+			// Boot state: an rfd1_ credential in config means account-connected.
+			if (isAccountConnected())
+			{
+				accountPairing.reset(AccountPairingService.State.CONNECTED);
+			}
 			refreshPanel();
 		}
 		log.info("RuneFlip Companion started (manual-assisted, no botting; one-way snapshots only)");
@@ -268,6 +278,11 @@ public class RuneFlipCompanionPlugin extends Plugin
 	protected void shutDown()
 	{
 		dirtyAtMs = 0;
+		if (accountPairing != null)
+		{
+			accountPairing.shutdown();
+			accountPairing = null;
+		}
 		if (assistHotkey != null)
 		{
 			assistHotkey.unregister();
@@ -1154,6 +1169,148 @@ public class RuneFlipCompanionPlugin extends Plugin
 		});
 	}
 
+	/** Account-connected = a v0.9.1 device credential is stored locally. */
+	private boolean isAccountConnected()
+	{
+		return config.ingestToken().trim().startsWith("rfd1_");
+	}
+
+	/**
+	 * Account pairing wiring (v0.9.1). The transport is plain HTTP via the
+	 * api client; the listener pushes state names to the panel (EDT) and, on
+	 * approval, stores the credential + adopted clientId as secret config —
+	 * the same slot the ingest paths already read, so sync works instantly.
+	 * Nothing here can reach the game.
+	 */
+	private AccountPairingService buildAccountPairing()
+	{
+		AccountPairingService.Transport transport = new AccountPairingService.Transport()
+		{
+			@Override
+			public void start(
+				java.util.function.Consumer<RuneFlipData.DevicePairingStartResponse> onSuccess,
+				java.util.function.Consumer<String> onFailure)
+			{
+				apiClient.startDevicePairing(
+					config.backendUrl(), ensureClientId(), "RuneLite",
+					onSuccess, onFailure);
+			}
+
+			@Override
+			public void poll(
+				String deviceCode,
+				java.util.function.Consumer<RuneFlipData.DevicePollResponse> onSuccess,
+				Runnable onFailure)
+			{
+				apiClient.pollDevicePairing(
+					config.backendUrl(), deviceCode, onSuccess, onFailure);
+			}
+		};
+		AccountPairingService.Listener listener = new AccountPairingService.Listener()
+		{
+			@Override
+			public void onStateChanged(
+				AccountPairingService.State state,
+				String userCode,
+				String pairingUrl,
+				String error)
+			{
+				// State names only — never a code in the log.
+				log.debug("RuneFlip account pairing state: {}", state);
+				RuneFlipPanel target = panel;
+				if (target != null)
+				{
+					SwingUtilities.invokeLater(
+						() -> target.setAccountState(state, userCode, error));
+				}
+			}
+
+			@Override
+			public void onApproved(RuneFlipData.DevicePollResponse response)
+			{
+				adoptAccountDevice(response);
+			}
+		};
+		return new AccountPairingService(executor, transport, listener);
+	}
+
+	/**
+	 * Stores the one-time device credential + adopted clientId (both secret
+	 * config, never logged/displayed) and resets the send caches, exactly
+	 * like the legacy pairing adoption path.
+	 */
+	private void adoptAccountDevice(RuneFlipData.DevicePollResponse response)
+	{
+		if (response.credential == null || response.credential.trim().isEmpty())
+		{
+			return;
+		}
+		if (response.device != null && response.device.clientId != null
+			&& !response.device.clientId.trim().isEmpty())
+		{
+			configManager.setConfiguration(
+				RuneFlipCompanionConfig.GROUP, "clientId",
+				response.device.clientId.trim().toLowerCase());
+		}
+		configManager.setConfiguration(
+			RuneFlipCompanionConfig.GROUP, "ingestToken",
+			response.credential.trim());
+		configManager.setConfiguration(
+			RuneFlipCompanionConfig.GROUP, "pairedAt",
+			Instant.now().toString());
+		lastSentFingerprint = null;
+		lastCapitalFingerprint = null;
+		overviewCache.clear();
+		itemContextCache.clear();
+		prefsQueryMemo = null;
+		log.info("RuneFlip Companion connected to account (device pairing)");
+		RuneFlipPanel target = panel;
+		if (target != null)
+		{
+			SwingUtilities.invokeLater(() -> target.setPaired(true));
+		}
+		refreshPanel();
+	}
+
+	private RuneFlipPanel.AccountActions accountActions()
+	{
+		return new RuneFlipPanel.AccountActions()
+		{
+			@Override
+			public void connect()
+			{
+				accountPairing.connect();
+			}
+
+			@Override
+			public void cancel()
+			{
+				accountPairing.cancel();
+			}
+
+			@Override
+			public void disconnect()
+			{
+				// Same best-effort revoke + local clear as the legacy unpair;
+				// the backend revokes the whole device for rfd1_ credentials.
+				revokePairing(message -> { });
+				accountPairing.reset(
+					AccountPairingService.State.NOT_CONNECTED);
+			}
+
+			@Override
+			public void openPairingPage()
+			{
+				String url = accountPairing.pairingUrl();
+				if (url != null && (url.startsWith("https://") || url.startsWith("http://")))
+				{
+					// RuneLite's own helper: opens the OS browser, no game touch.
+					net.runelite.client.util.LinkBrowser.browse(url);
+				}
+			}
+		};
+	}
+
 	private RuneFlipPanel.PairingActions pairingActions()
 	{
 		return new RuneFlipPanel.PairingActions()
@@ -1717,6 +1874,13 @@ public class RuneFlipCompanionPlugin extends Plugin
 					else
 					{
 						log.warn("RuneFlip sync rejected: {}", describeResponse(r.code()));
+						// 401 with an account credential (v0.9.1): the device
+						// was revoked server-side — surface it in the panel.
+						if (r.code() == 401 && token.startsWith("rfd1_")
+							&& accountPairing != null)
+						{
+							accountPairing.markRevoked();
+						}
 					}
 				}
 			}

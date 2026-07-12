@@ -69,4 +69,19 @@ public final class BackendUrl
 		String base = normalize(raw);
 		return base == null ? null : base + "/pairing/token";
 	}
+
+	/** Account pairing start endpoint (v0.9.1), or null when unusable. */
+	public static String pairingStartEndpoint(String raw)
+	{
+		String base = normalize(raw);
+		return base == null ? null : base + "/pairing/start";
+	}
+
+	/** Account pairing poll endpoint (v0.9.1) — same path as the legacy
+	 *  revoke but POST; the backend routes them by verb. */
+	public static String pairingPollEndpoint(String raw)
+	{
+		String base = normalize(raw);
+		return base == null ? null : base + "/pairing/token";
+	}
 }

@@ -274,6 +274,128 @@ public class RuneFlipApiClient
 		});
 	}
 
+	/**
+	 * Account pairing start (v0.9.1). Sends this install's anonymous client
+	 * id + a friendly device name; receives the userCode to display and the
+	 * deviceCode polling secret (kept in memory only — never logged).
+	 */
+	public void startDevicePairing(
+		String backendUrl,
+		String clientId,
+		String deviceName,
+		Consumer<RuneFlipData.DevicePairingStartResponse> onSuccess,
+		Consumer<String> onFailure)
+	{
+		String endpoint = BackendUrl.pairingStartEndpoint(backendUrl);
+		if (endpoint == null)
+		{
+			onFailure.accept("Set a valid Backend URL first.");
+			return;
+		}
+		Request request = new Request.Builder()
+			.url(endpoint)
+			.header(CLIENT_ID_HEADER, clientId)
+			.post(RequestBody.create(JSON, gson.toJson(
+				new RuneFlipData.DevicePairingStartRequest(deviceName))))
+			.build();
+		http.newCall(request).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				onFailure.accept("Network error — is the backend reachable?");
+			}
+
+			@Override
+			public void onResponse(Call call, Response response)
+			{
+				try (Response r = response)
+				{
+					if (!r.isSuccessful())
+					{
+						onFailure.accept(r.code() == 404
+							? "This backend has no account pairing yet (needs v0.9.1+)."
+							: "Pairing start failed (HTTP " + r.code() + ").");
+						return;
+					}
+					ResponseBody body = r.body();
+					RuneFlipData.DevicePairingStartResponse parsed = body == null
+						? null
+						: gson.fromJson(body.string(),
+							RuneFlipData.DevicePairingStartResponse.class);
+					if (parsed == null
+						|| parsed.deviceCode == null || parsed.deviceCode.trim().isEmpty()
+						|| parsed.userCode == null || parsed.userCode.trim().isEmpty())
+					{
+						onFailure.accept("Pairing start failed: unexpected backend response.");
+						return;
+					}
+					onSuccess.accept(parsed);
+				}
+				catch (IOException | RuntimeException e)
+				{
+					onFailure.accept("Pairing start failed: unreadable backend response.");
+				}
+			}
+		});
+	}
+
+	/**
+	 * Account pairing poll (v0.9.1): POST /pairing/token with the deviceCode.
+	 * Always yields a DevicePollResponse (statuses drive the state machine);
+	 * network problems surface as onFailure so the poller can retry.
+	 */
+	public void pollDevicePairing(
+		String backendUrl,
+		String deviceCode,
+		Consumer<RuneFlipData.DevicePollResponse> onSuccess,
+		Runnable onFailure)
+	{
+		String endpoint = BackendUrl.pairingPollEndpoint(backendUrl);
+		if (endpoint == null)
+		{
+			onFailure.run();
+			return;
+		}
+		Request request = new Request.Builder()
+			.url(endpoint)
+			.post(RequestBody.create(JSON, gson.toJson(
+				new RuneFlipData.DevicePollRequest(deviceCode))))
+			.build();
+		http.newCall(request).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				onFailure.run();
+			}
+
+			@Override
+			public void onResponse(Call call, Response response)
+			{
+				try (Response r = response)
+				{
+					ResponseBody body = r.body();
+					RuneFlipData.DevicePollResponse parsed =
+						!r.isSuccessful() || body == null
+							? null
+							: gson.fromJson(body.string(),
+								RuneFlipData.DevicePollResponse.class);
+					if (parsed == null || parsed.status == null)
+					{
+						onFailure.run();
+						return;
+					}
+					onSuccess.accept(parsed);
+				}
+				catch (IOException | RuntimeException e)
+				{
+					onFailure.run();
+				}
+			}
+		});
+	}
+
 	/** Both fields present and non-blank; anything else is rejected. */
 	static boolean isValidPairingResponse(RuneFlipData.PairingResponse response)
 	{
