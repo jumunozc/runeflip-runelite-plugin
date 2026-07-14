@@ -1,0 +1,17 @@
+{
+  "_source": "packages/shared/src/index.ts PLAN_FREE_ENTITLEMENTS — regenerate this fixture whenever the shared FREE bundle changes (EntitlementsServiceTest pins the Java mirror against it).",
+  "free": [
+    "core.dashboard",
+    "core.ge_slots",
+    "items.f2p",
+    "watchlist.basic",
+    "history.recent",
+    "stats.session",
+    "fastflip.basic",
+    "pairing",
+    "devices.basic",
+    "account.manage",
+    "settings.basic",
+    "billing.manage"
+  ]
+}

@@ -132,6 +132,9 @@ public class RuneFlipPanel extends PluginPanel
 	private AccountActions accountActions;
 	private AccountPairingService.State accountState =
 		AccountPairingService.State.NOT_CONNECTED;
+	/** Plan tier of the connected account (v0.9.2): "FREE" | "PRO". FREE is
+	 *  the safe default until the entitlements lookup succeeds. */
+	private String accountPlanTier = "FREE";
 
 	/** Context-aware GE panel opt-in (v0.8.5), refreshed from config. When ON,
 	 *  the panel is focused: only the selected-item card OR the Top 3, never the
@@ -190,6 +193,9 @@ public class RuneFlipPanel extends PluginPanel
 	/** Shown after a row click while the GE search is NOT open (v0.8.18): the
 	 *  selection is kept; the user opens the search manually to use it. */
 	static final String OPEN_GE_SEARCH_HINT = "Open GE search to use this item.";
+	/** Short lock copy when GE Assist is gated by the plan (v0.9.2). */
+	static final String GE_ASSIST_PRO_HINT =
+		"GE Assist is PRO — runeflip.com/upgrade";
 	/** Short contextual-card footer (v0.8.5) — the compliance rule, compact. */
 	static final String SHORT_DISCLAIMER = "Review manually.";
 	/** Sell-context warning (v0.8.12): shown amber (zero) / red (negative)
@@ -244,7 +250,7 @@ public class RuneFlipPanel extends PluginPanel
 	private static final int MAX_NAME_CHARS = 40;
 	/** Shown in the header next to the wordmark (v0.8.7 design). Must match
 	 *  build.gradle's version — pinned by RuneFlipPanelTextTest. */
-	static final String PLUGIN_VERSION = "0.9.1";
+	static final String PLUGIN_VERSION = "0.9.2";
 
 	/**
 	 * Pairing callbacks implemented by the plugin (v0.6.3). Both are
@@ -640,6 +646,28 @@ public class RuneFlipPanel extends PluginPanel
 		repaint();
 	}
 
+	/**
+	 * Plan tier of the connected account (v0.9.2, EDT only): "FREE" | "PRO".
+	 * Display only — the label re-renders as "Connected · Free/Pro"; the
+	 * SERVER already shaped every response for the plan, so nothing else in
+	 * the panel needs to react abruptly (open content is never wiped).
+	 */
+	void setAccountPlanTier(String planCode)
+	{
+		String tier = "PRO".equals(planCode) ? "PRO" : "FREE";
+		if (tier.equals(accountPlanTier))
+		{
+			return;
+		}
+		accountPlanTier = tier;
+		if (accountState == AccountPairingService.State.CONNECTED)
+		{
+			renderAccountState(accountState, null, null);
+			revalidate();
+			repaint();
+		}
+	}
+
 	private void renderAccountState(
 		AccountPairingService.State state,
 		String userCode,
@@ -660,15 +688,20 @@ public class RuneFlipPanel extends PluginPanel
 						+ "logged in. Never approve a code someone sent you."));
 				break;
 			case CONNECTED:
-				accountStatus.setText("Connected");
+				// v0.9.2: the tier travels in the status label. FREE also
+				// names the one plugin feature the plan locks (GE Assist).
+				accountStatus.setText("PRO".equals(accountPlanTier)
+					? "Connected · Pro" : "Connected · Free");
 				accountStatus.setForeground(PROFIT);
 				accountCode.setText(" ");
 				accountCode.setVisible(false);
 				accountPrimaryButton.setText("Disconnect");
 				accountOpenButton.setVisible(false);
-				accountHint.setText(html(
-					"This RuneLite is linked to your RuneFlip account. Manage "
-						+ "devices from the web dashboard."));
+				accountHint.setText(html("PRO".equals(accountPlanTier)
+					? "This RuneLite is linked to your RuneFlip account. Manage "
+						+ "devices from the web dashboard."
+					: "This RuneLite is linked to your RuneFlip account. "
+						+ GE_ASSIST_PRO_HINT));
 				break;
 			case EXPIRED:
 				accountStatus.setText("Code expired");

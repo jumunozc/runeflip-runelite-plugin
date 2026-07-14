@@ -425,6 +425,41 @@ public class RuneFlipApiClient
 		}
 	}
 
+	/**
+	 * Plan & entitlements of this install (v0.9.2) — GET /entitlements with
+	 * the stored credential (X-RuneFlip-Token: v0.9.1 rfd1_ device credential
+	 * or legacy rfp_ token) plus the anonymous client id. The backend resolves
+	 * the owning account's plan; an anonymous or unverifiable caller simply
+	 * receives the FREE bundle — the endpoint never rejects. Display/gating
+	 * input only: nothing here reads or acts on the game.
+	 */
+	public void fetchEntitlements(
+		String backendUrl,
+		String clientId,
+		String token,
+		Consumer<RuneFlipData.EntitlementsResponse> onSuccess,
+		Runnable onFailure)
+	{
+		String base = BackendUrl.normalize(backendUrl);
+		if (base == null)
+		{
+			onFailure.run();
+			return;
+		}
+		Request.Builder builder =
+			new Request.Builder().url(base + "/entitlements").get();
+		if (clientId != null && !clientId.trim().isEmpty())
+		{
+			builder.header(CLIENT_ID_HEADER, clientId.trim());
+		}
+		if (token != null && !token.trim().isEmpty())
+		{
+			builder.header(TOKEN_HEADER, token.trim());
+		}
+		enqueue(builder.build(), RuneFlipData.EntitlementsResponse.class,
+			onSuccess, onFailure);
+	}
+
 	private <T> void get(
 		String backendUrl,
 		String path,
@@ -445,7 +480,15 @@ public class RuneFlipApiClient
 		{
 			builder.header(CLIENT_ID_HEADER, clientId.trim());
 		}
-		Request request = builder.build();
+		enqueue(builder.build(), type, onSuccess, onFailure);
+	}
+
+	private <T> void enqueue(
+		Request request,
+		Class<T> type,
+		Consumer<T> onSuccess,
+		Runnable onFailure)
+	{
 		http.newCall(request).enqueue(new Callback()
 		{
 			@Override

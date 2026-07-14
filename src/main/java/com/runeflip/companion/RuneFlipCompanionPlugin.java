@@ -109,6 +109,10 @@ public class RuneFlipCompanionPlugin extends Plugin
 	/** Account pairing state machine (v0.9.1); rebuilt on every startUp. */
 	private AccountPairingService accountPairing;
 
+	/** Plan/entitlement cache (v0.9.2); rebuilt on every startUp. Display and
+	 *  panel gating only — the server enforces the real plan cuts. */
+	private EntitlementsService entitlements;
+
 	@Inject
 	private RuneFlipCompanionConfig config;
 
@@ -250,6 +254,21 @@ public class RuneFlipCompanionPlugin extends Plugin
 			keyManager, () -> config.geFieldAssistHotkey(), this::onAssistHotkey);
 		assistHotkey.register();
 		accountPairing = buildAccountPairing();
+		// Plans & entitlements (v0.9.2): read-only plan lookup with the stored
+		// credential; the SERVER is the real gate (FREE responses are already
+		// shaped). Fallback FREE — a failed lookup never unlocks anything.
+		entitlements = new EntitlementsService(
+			(onSuccess, onFailure) -> apiClient.fetchEntitlements(
+				config.backendUrl(), ensureClientId(),
+				config.ingestToken(), onSuccess, onFailure),
+			planCode -> SwingUtilities.invokeLater(() ->
+			{
+				RuneFlipPanel target = panel;
+				if (target != null)
+				{
+					target.setAccountPlanTier(planCode);
+				}
+			}));
 		if (config.panelEnabled())
 		{
 			panel = new RuneFlipPanel(
@@ -288,6 +307,7 @@ public class RuneFlipCompanionPlugin extends Plugin
 			assistHotkey.unregister();
 			assistHotkey = null;
 		}
+		entitlements = null;
 		chatboxHint = null;
 		searchAssist = null;
 		if (navButton != null)
@@ -549,7 +569,7 @@ public class RuneFlipCompanionPlugin extends Plugin
 	public void onMenuOpened(MenuOpened event)
 	{
 		GeFieldAssistService assist = fieldAssist;
-		if (assist == null || !config.enableGeFieldAssist())
+		if (assist == null || !config.enableGeFieldAssist() || !hasGeAssist())
 		{
 			return;
 		}
@@ -638,7 +658,7 @@ public class RuneFlipCompanionPlugin extends Plugin
 		{
 			return;
 		}
-		if (!config.enableGeFieldAssist())
+		if (!config.enableGeFieldAssist() || !hasGeAssist())
 		{
 			hintView.clear();
 			lastHintText = null;
@@ -743,7 +763,7 @@ public class RuneFlipCompanionPlugin extends Plugin
 		clientThread.invoke(() ->
 		{
 			GeFieldAssistService assist = fieldAssist;
-			if (assist == null || !config.enableGeFieldAssist())
+			if (assist == null || !config.enableGeFieldAssist() || !hasGeAssist())
 			{
 				return;
 			}
@@ -1152,6 +1172,18 @@ public class RuneFlipCompanionPlugin extends Plugin
 	private void prepareSelectedSuggestion(RuneFlipData.FastFlipItem item)
 	{
 		RuneFlipPanel target = panel;
+		// v0.9.2: GE Assist is PRO — without the entitlement the click keeps
+		// the selection (display) and shows the short lock copy instead of
+		// running the select script.
+		if (!hasGeAssist())
+		{
+			if (target != null)
+			{
+				SwingUtilities.invokeLater(() ->
+					target.showGeSuggestionHint(RuneFlipPanel.GE_ASSIST_PRO_HINT));
+			}
+			return;
+		}
 		clientThread.invoke(() ->
 		{
 			GeSearchAssistService select = searchAssist;
@@ -1173,6 +1205,18 @@ public class RuneFlipCompanionPlugin extends Plugin
 	private boolean isAccountConnected()
 	{
 		return config.ingestToken().trim().startsWith("rfd1_");
+	}
+
+	/**
+	 * GE Assist is PRO (v0.9.2, `ge_assist`). Without the entitlement the
+	 * assist SURFACES simply do not appear (menu options, chatbox hints,
+	 * hotkey, row select) and the panel shows the short lock copy instead.
+	 * The compliance gates themselves are UNCHANGED — a plan never relaxes
+	 * the manual-assisted rules; it only decides whether assist exists.
+	 */
+	private boolean hasGeAssist()
+	{
+		return entitlements != null && entitlements.has("ge_assist");
 	}
 
 	/**
@@ -1263,6 +1307,12 @@ public class RuneFlipCompanionPlugin extends Plugin
 		overviewCache.clear();
 		itemContextCache.clear();
 		prefsQueryMemo = null;
+		// New identity ⇒ new plan: drop the cached tier so the next refresh
+		// resolves the owning account's entitlements immediately (v0.9.2).
+		if (entitlements != null)
+		{
+			entitlements.reset();
+		}
 		log.info("RuneFlip Companion connected to account (device pairing)");
 		RuneFlipPanel target = panel;
 		if (target != null)
@@ -1296,6 +1346,11 @@ public class RuneFlipCompanionPlugin extends Plugin
 				revokePairing(message -> { });
 				accountPairing.reset(
 					AccountPairingService.State.NOT_CONNECTED);
+				// No credential ⇒ back to the FREE floor (v0.9.2).
+				if (entitlements != null)
+				{
+					entitlements.reset();
+				}
 			}
 
 			@Override
@@ -1437,6 +1492,16 @@ public class RuneFlipCompanionPlugin extends Plugin
 		lastPanelRefreshMs = System.currentTimeMillis();
 		String url = config.backendUrl();
 		String clientId = ensureClientId();
+
+		// Plans & entitlements (v0.9.2): TTL-cached lookup with the stored
+		// credential; the panel label follows via the service listener. Also
+		// push the current tier so a fresh panel starts labeled correctly.
+		if (entitlements != null)
+		{
+			entitlements.refreshIfStale();
+			final String tier = entitlements.planCode();
+			SwingUtilities.invokeLater(() -> target.setAccountPlanTier(tier));
+		}
 
 		// Focus the panel (v0.8.5): contextual mode shows only the selected-item
 		// card or the Top 3, hiding the legacy dashboard + GE completed. Applied

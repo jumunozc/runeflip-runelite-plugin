@@ -76,7 +76,50 @@ public final class RuneFlipData
 		public List<GeSlotActionInsight> slotInsights;
 		/** Applied strategy echo (v0.8.0); null on pre-0.8.0 backends. */
 		public FastFlipStrategy strategy;
+		/** Honest plan-truncation metadata (v0.9.2); null on older backends
+		 *  and on unshaped responses. */
+		public PlanAccessMeta access;
 		public String disclaimer;
+	}
+
+	/**
+	 * Plan & entitlements of this install (v0.9.2) — GET /entitlements. The
+	 * plugin renders/gates on it; the SERVER remains the real gate (a FREE
+	 * response already excluded Members items and premium targets). All boxed
+	 * types: any field may be null on older backends.
+	 */
+	public static class EntitlementsResponse
+	{
+		/** "FREE" | "PRO". */
+		public String planCode;
+		/** "ACTIVE" | "EXPIRED" | "REVOKED". */
+		public String planStatus;
+		public List<String> entitlements;
+		/** ISO end of the current grant; null = open-ended / FREE. */
+		public String expiresAt;
+		/** Server clock — expiry is compared against THIS, never local time. */
+		public String serverTime;
+		/** Mobile-only hint; the plugin never shows ads (Plugin Hub rule). */
+		public Boolean adsEnabled;
+		/** "F2P_ONLY" | "ALL". */
+		public String membershipItemAccess;
+	}
+
+	/**
+	 * Honest-truncation block plan-limited responses carry (v0.9.2). Display
+	 * copy input only.
+	 */
+	public static class PlanAccessMeta
+	{
+		/** "FREE" | "PRO". */
+		public String plan;
+		/** "F2P_ONLY" | "ALL". */
+		public String membershipItemAccess;
+		public Boolean isLimited;
+		public String limitReason;
+		public String upgradeEntitlement;
+		public Long lockedCount;
+		public Boolean strategyLocked;
 	}
 
 	public static class FastFlipCoverage
@@ -168,7 +211,10 @@ public final class RuneFlipData
 		public String competitionRisk;
 		public Double buyPressurePct;
 		public Double topFlipScore;
-		/** Price Edge targets (v0.7.1); null on pre-0.7.1 backends. */
+		/** Members flag (v0.9.2); null on older backends / unknown items. */
+		public Boolean members;
+		/** Price Edge targets (v0.7.1); null on pre-0.7.1 backends. v0.9.2:
+		 *  also ABSENT (null) on a FREE plan — targets are premium. */
 		public PriceEdge priceEdge;
 		/** Recommended action (v0.8.2); null on pre-0.8.2 backends. */
 		public RecommendedAction action;
@@ -250,6 +296,10 @@ public final class RuneFlipData
 		public String risk;
 		public List<String> reasons;
 		public String disclaimer;
+		/** v0.9.2: TRUE when the plan reduced this block to the wiki legs —
+		 *  every target is null and `recommendation` is NOT meaningful; the
+		 *  panel must render the locked state instead. Null on full blocks. */
+		public Boolean locked;
 	}
 
 	/**
@@ -271,6 +321,11 @@ public final class RuneFlipData
 		/** Echo of the requested offer side ("BUY"/"SELL", v0.8.12); null on
 		 *  pre-v0.8.12 backends or when the request sent no side. */
 		public String side;
+		/** v0.9.2: TRUE = identity-only locked card (FREE + Members item);
+		 *  itemName travels, every analytic field is null. Null otherwise. */
+		public Boolean locked;
+		/** Members flag (v0.9.2); null on older backends / unknown items. */
+		public Boolean members;
 		public Boolean recommended;
 		public String notRecommendedReason;
 		public PriceEdge priceEdge;
@@ -288,6 +343,8 @@ public final class RuneFlipData
 		public String sellSpeed;
 		/** Applied strategy echo (v0.8.0); null on pre-0.8.0 backends. */
 		public FastFlipStrategy strategy;
+		/** Honest plan-truncation metadata (v0.9.2); null when unshaped. */
+		public PlanAccessMeta access;
 		public String disclaimer;
 	}
 
